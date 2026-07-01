@@ -39,6 +39,9 @@ function truthyParam(v) {
 const HUD_DIR = dirname(fileURLToPath(import.meta.url));
 const HUD_HTML = readFileSync(join(HUD_DIR, 'hud.html'), 'utf8');
 const SETUP_HTML = readFileSync(join(HUD_DIR, 'setup.html'), 'utf8');
+// The Scriptable widget body, served so the pasted stub can load it fresh each
+// refresh (update the widget without re-pasting). Contains no secrets.
+const WIDGET_JS = readFileSync(join(HUD_DIR, 'widget.scriptable.js'), 'utf8');
 const HUD_ICON = readFileSync(join(HUD_DIR, 'icon.png'));
 // Web-app manifest so the HUD installs to the home screen as a standalone app.
 const HUD_MANIFEST = {
@@ -65,6 +68,7 @@ export function createServer({ client, scheduler, watchdog, history }) {
   // Web HUD (control panel) + its home-screen app assets.
   app.get(['/', '/hud'], (_req, res) => res.type('html').send(HUD_HTML));
   app.get('/setup', (_req, res) => res.type('html').send(SETUP_HTML));
+  app.get('/widget.js', (_req, res) => res.type('application/javascript').send(WIDGET_JS));
   app.get('/icon.png', (_req, res) => res.type('png').send(HUD_ICON));
   app.get('/manifest.json', (_req, res) => res.json(HUD_MANIFEST));
 
