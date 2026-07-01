@@ -44,14 +44,12 @@ if (!s) {
   const name = left.addText((s.name || "HOT TUB").toUpperCase());
   name.font = Font.boldSystemFont(16);
   name.textColor = PRIMARY;
-  const st = left.addText(
-    faulted ? "FAULT " + s.faults.map((f) => f.code).join(",") : heating ? "HEATING" : "IDLE"
-  );
+  const statusTxt =
+    (faulted ? "FAULT " + s.faults.map((f) => f.code).join(",") : heating ? "HEATING" : "IDLE") +
+    "   ·   FILTER " + (s.filter ? "ON" : "OFF");
+  const st = left.addText(statusTxt);
   st.font = Font.semiboldSystemFont(10);
   st.textColor = faulted ? RED : heating ? AMBER : SECOND;
-  const fl = left.addText("FILTER " + (s.filter ? "ON" : "OFF"));
-  fl.font = Font.mediumSystemFont(10);
-  fl.textColor = SECOND;
 
   top.addSpacer();
 
@@ -69,7 +67,7 @@ if (!s) {
   // Size the chart to the widget: medium and large are the same width, large is
   // taller — so grow the chart height and let a flexible spacer bottom-align.
   const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
-  const chartH = fam === "large" ? 168 : 72;
+  const chartH = fam === "large" ? 150 : 58;
 
   w.addSpacer(8);
   const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 656, chartH * 2) : null;
