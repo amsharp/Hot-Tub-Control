@@ -14,6 +14,7 @@ import { SmartHeatPlanner } from './thermal/planner.js';
 import { EnergyMeter } from './energy.js';
 import { WeatherProvider } from './weather.js';
 import { RawLog } from './rawlog.js';
+import { FlowModel } from './flow.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -47,6 +48,14 @@ async function main() {
   // Diagnostic raw-register capture (for decoding the pump's extra temperature
   // registers into a flow/filter-health proxy). Diagnostic only.
   const rawlog = new RawLog();
+
+  // Flow-rate estimate from the heater energy balance (inlet/outlet ΔT + power).
+  const flowModel = new FlowModel({
+    heaterW: config.flow.heaterW,
+    inlet: { key: config.flow.inletKey, scale: config.flow.inletScale },
+    outlet: { key: config.flow.outletKey, scale: config.flow.outletScale },
+    minDeltaC: config.flow.minDeltaC,
+  });
 
   // Software energy estimator.
   const meter = new EnergyMeter({
@@ -178,6 +187,13 @@ async function main() {
       log.warn('Raw log failed:', err.message);
     }
 
+    // Update the flow estimate's last-good reading from the 2-min stream.
+    try {
+      flowModel.compute(status, now);
+    } catch (err) {
+      log.warn('Flow compute failed:', err.message);
+    }
+
     if (tempF != null && config.smartHeat.enabled) {
       try {
         await runSmartHeat(status, est.tempF, est.reliable);
@@ -239,7 +255,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history, rawlog, getPlan, getEnergy });
+  const app = createServer({ client, scheduler, watchdog, history, rawlog, flowModel, getPlan, getEnergy });
 
   // Keep the outdoor forecast fresh (used as the cooling model's ambient). Runs
   // independently of the pump; a no-op when no location is configured.

@@ -58,7 +58,7 @@ const HUD_MANIFEST = {
   ],
 };
 
-export function createServer({ client, scheduler, watchdog, history, rawlog, getPlan, getEnergy }) {
+export function createServer({ client, scheduler, watchdog, history, rawlog, flowModel, getPlan, getEnergy }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -164,7 +164,8 @@ export function createServer({ client, scheduler, watchdog, history, rawlog, get
   app.get('/api/status', requireAdmin, async (_req, res) => {
     try {
       const status = await client.getStatus();
-      res.json({ ...status, summary: formatStatus(status) });
+      const flow = flowModel ? flowModel.compute(status) : null;
+      res.json({ ...status, flow, summary: formatStatus(status) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
