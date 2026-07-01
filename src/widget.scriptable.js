@@ -22,10 +22,10 @@ async function getJSON(path) {
 
 const w = new ListWidget();
 w.backgroundColor = BG;
-// One uniform inset on every side so all elements sit inside a safe rounded box
-// and the top-right temp has equal whitespace to the top and side edges.
-const PAD = 20;
-w.setPadding(PAD, PAD, PAD, PAD);
+// E*TRADE-style insets: comfortable equal top/side margins, a touch more at the
+// bottom so the footer clears the rounded corner. The chart runs nearly
+// full-width within these margins.
+w.setPadding(16, 16, 18, 16);
 w.url = BASE; // tap opens the full controls
 
 let s = null;
@@ -70,13 +70,13 @@ if (!s) {
   // Size the chart to the widget: medium and large are the same width, large is
   // taller — so grow the chart height and let a flexible spacer bottom-align.
   const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
-  const chartH = fam === "large" ? 148 : 54;
+  const chartH = fam === "large" ? 150 : 60;
 
   w.addSpacer(8);
-  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 570, chartH * 2) : null;
+  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 600, chartH * 2) : null;
   if (img) {
     const wi = w.addImage(img);
-    wi.imageSize = new Size(285, chartH);
+    wi.imageSize = new Size(300, chartH);
     wi.centerAlignImage();
   } else {
     w.addSpacer(Math.max(4, chartH / 2 - 8));
