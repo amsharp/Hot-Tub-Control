@@ -9,6 +9,8 @@ import { GizwitsRealtime } from './bestway/realtime.js';
 import { createServer } from './server.js';
 import { reportState, requestSync } from './google/homegraph.js';
 import { History } from './history.js';
+import { ThermalModel } from './thermal/model.js';
+import { SmartHeatPlanner } from './thermal/planner.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -39,15 +41,80 @@ async function main() {
   // Rolling hourly temperature history for the widget/HUD chart.
   const history = new History();
 
-  // Called on every status read: keep the display unit pinned + log history.
+  // Self-calibrating heat model + smart pre-heat planner.
+  const model = new ThermalModel();
+  const planner = new SmartHeatPlanner({
+    model,
+    targetF: config.smartHeat.targetF,
+    targetMin: config.smartHeat.targetMin,
+    peaks: config.smartHeat.peaks,
+    safetyMin: config.smartHeat.safetyMin,
+  });
+  let lastPlan = null;
+
+  function localNow() {
+    const d = new Date(); // container TZ (set TZ=America/Los_Angeles)
+    return {
+      min: d.getHours() * 60 + d.getMinutes(),
+      day: d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(),
+    };
+  }
+
+  async function runSmartHeat(status, tempF) {
+    const { min, day } = localNow();
+    const p = planner.plan(tempF, min, day);
+    lastPlan = { ...p, currentTemp: tempF, nowMin: min, at: Date.now() };
+    if (p.heat === true && !status.heat) {
+      log.info(
+        `SmartHeat -> ON (${p.reason}); ~${Number.isFinite(p.needHours) ? p.needHours.toFixed(1) + 'h' : 'max'} to reach ${p.targetF}F`,
+      );
+      await client.setTargetTemperature(config.smartHeat.targetF, 'F');
+      await client.setHeating(true);
+    } else if (p.heat === false && status.heat) {
+      log.info(`SmartHeat -> OFF (${p.reason})`);
+      await client.setHeating(false);
+    }
+  }
+
+  // Called on every status read: enforce unit, log history, learn the heat
+  // model, and run the smart pre-heat controller.
   async function onStatus(status) {
     await enforceUnit(status);
+    const tempF =
+      status.currentTemp == null
+        ? null
+        : status.unit === 'C'
+          ? Math.round((status.currentTemp * 9) / 5 + 32)
+          : status.currentTemp;
     try {
       history.record(status);
     } catch (err) {
       log.warn('History record failed:', err.message);
     }
+    if (tempF != null) {
+      try {
+        model.observe(tempF, status.heat, Date.now());
+      } catch (err) {
+        log.warn('Thermal observe failed:', err.message);
+      }
+      if (config.smartHeat.enabled) {
+        try {
+          await runSmartHeat(status, tempF);
+        } catch (err) {
+          log.warn('SmartHeat failed:', err.message);
+        }
+      }
+    }
   }
+
+  const getPlan = () => ({
+    enabled: config.smartHeat.enabled,
+    targetF: config.smartHeat.targetF,
+    targetMin: config.smartHeat.targetMin,
+    peaks: config.smartHeat.peaks,
+    plan: lastPlan,
+    model: { heat: model.heatParams(), cool: model.coolParams(), ...model.stats() },
+  });
 
   // Keep the pump pinned to the preferred display unit (a power-cycle resets it
   // to Celsius). Fires on startup and on every watchdog cycle.
@@ -73,7 +140,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history });
+  const app = createServer({ client, scheduler, watchdog, history, getPlan });
 
   // Everything below talks to the pump, so it only runs once credentials exist.
   if (hasBestwayCreds) {

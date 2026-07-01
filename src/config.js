@@ -38,6 +38,26 @@ function bool(value, fallback = false) {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
+// Parse "HH:MM" into minutes-of-day; returns fallback if malformed.
+function hhmm(value, fallback) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return fallback;
+  const min = Number(m[1]) * 60 + Number(m[2]);
+  return min >= 0 && min < 1440 ? min : fallback;
+}
+
+// Parse "16:00-21:00,06:00-09:00" into [{start,end}] minutes-of-day windows.
+function peaks(value, fallback) {
+  const out = [];
+  for (const part of String(value || '').split(',')) {
+    const [a, b] = part.split('-');
+    const start = hhmm(a, null);
+    const end = hhmm(b, null);
+    if (start != null && end != null) out.push({ start, end });
+  }
+  return out.length ? out : fallback;
+}
+
 export const config = {
   projectRoot,
   port: Number(process.env.PORT) || 3000,
@@ -74,6 +94,17 @@ export const config = {
 
   notify: {
     webhookUrl: process.env.NOTIFY_WEBHOOK_URL || '',
+  },
+
+  // Smart pre-heat: model the tub's heat/cool rates and turn the heater on at
+  // the latest off-peak time that still reaches targetF by targetMin, never
+  // heating during a peak window.
+  smartHeat: {
+    enabled: bool(process.env.SMART_HEAT_ENABLED, false),
+    targetF: Number(process.env.SMART_HEAT_TARGET_F) || 104,
+    targetMin: hhmm(process.env.SMART_HEAT_BY, 16 * 60), // default 4:00 PM
+    peaks: peaks(process.env.SMART_HEAT_PEAK, [{ start: 16 * 60, end: 21 * 60 }]), // default 4-9 PM
+    safetyMin: Number(process.env.SMART_HEAT_SAFETY_MIN) || 45,
   },
 
   watchdog: {

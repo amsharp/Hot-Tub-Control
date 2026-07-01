@@ -58,7 +58,7 @@ const HUD_MANIFEST = {
   ],
 };
 
-export function createServer({ client, scheduler, watchdog, history }) {
+export function createServer({ client, scheduler, watchdog, history, getPlan }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -77,6 +77,11 @@ export function createServer({ client, scheduler, watchdog, history }) {
   // 24h temperature history for the widget/HUD chart.
   app.get('/api/history', requireAdmin, (_req, res) =>
     res.json({ samples: history ? history.list() : [] }),
+  );
+
+  // Smart pre-heat plan + learned model (for transparency / the HUD).
+  app.get('/api/plan', requireAdmin, (_req, res) =>
+    res.json(getPlan ? getPlan() : { enabled: false }),
   );
 
   // Seed a synthetic 24h backfill (a realistic warm-up-then-hold curve anchored
