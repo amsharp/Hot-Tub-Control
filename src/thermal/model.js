@@ -64,7 +64,16 @@ export class ThermalModel {
     const d = this.store.data;
     if (!d.heat) d.heat = emptySums();
     if (!d.cool) d.cool = emptySums();
-    if (!('last' in d)) d.last = null;
+    // Reset wall-clock-relative transient state on load. circSince/last/offFrom
+    // only mean anything relative to a continuously-running clock; after a restart
+    // the persisted timestamps are stale, and trusting them would mark a freshly
+    // resumed, physically-unsettled sensor as "settled" (defeating the settle
+    // gate) or bank a bogus rate across the downtime. The learned heat/cool sums
+    // ARE valid across restarts and are kept; lastReliable is kept (it only
+    // projects cooling forward, which errs safely cold).
+    d.circSince = null;
+    d.last = null;
+    d.offFrom = null;
   }
 
   /** Forecast ambient at `ts`, falling back to the static prior when unknown. */
@@ -166,11 +175,15 @@ export class ThermalModel {
   projectCool(fromTemp, fromTs, toTs) {
     const { loss } = this.coolParams(fromTs);
     const STEP = 3_600_000;
+    // A projection over more than ~2 days is meaningless (the tub has long since
+    // reached ambient) and, after a long outage, fromTs can be far in the past —
+    // clamp the window so we never walk thousands of hourly steps.
+    const end = Math.min(toTs, fromTs + 48 * STEP);
     let T = fromTemp;
     let t = fromTs;
     let guard = 0;
-    while (t < toTs && guard++ < 100_000) {
-      const dt = Math.min(STEP, toTs - t);
+    while (t < end && guard++ < 100_000) {
+      const dt = Math.min(STEP, end - t);
       const amb = this._ambientAt(t + dt / 2);
       T = amb + (T - amb) * Math.exp(-loss * (dt / 3_600_000));
       t += dt;

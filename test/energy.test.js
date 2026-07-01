@@ -39,6 +39,16 @@ test('attributes override + peak energy to their buckets at the peak rate', () =
   assert.ok(Math.abs(s.overrideCost - 0.6) < 0.01, `$0.60 override (${s.overrideCost})`);
 });
 
+test('does not bill a phantom interval across a restart (drops persisted lastAt)', () => {
+  // Persisted state from before a restart: was drawing 1340W, month total 5 kWh.
+  const store = { data: { lastAt: 0, lastW: 1340, monthKwh: 5, monthCost: 2, month: 202607, day: 20260701 }, save() {} };
+  const m = new EnergyMeter({ store, watts: { heater: 1300, pump: 40, blower: 600 } });
+  const before = m.summary().monthKwh;
+  // First sample after restart, 1h later — must only re-prime, not bill 1340W×1h.
+  m.sample({ raw: { heat: 3 }, filter: true }, 3_600_000, 20260701, 202607);
+  assert.equal(m.summary().monthKwh, before, 'no phantom energy billed on the first post-restart sample');
+});
+
 test('resets the daily total on a new day but keeps the monthly total', () => {
   const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1000, pump: 0, blower: 0 } });
   m.sample({ raw: { heat: 3 } }, 0, 20260701, 202607);

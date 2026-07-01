@@ -6,6 +6,17 @@ function fakeStore() {
   return { data: {}, save() {} };
 }
 
+test('drops stale settle/streak state on load so a restart re-settles the sensor', () => {
+  // Simulate persisted state from before a restart (old wall-clock timestamps).
+  const store = { data: { circSince: 111, last: { t: 111, T: 100, heat: true }, offFrom: { t: 111, T: 90 } }, save() {} };
+  const m = new ThermalModel({ store });
+  assert.equal(m.store.data.circSince, null, 'circSince cleared');
+  assert.equal(m.store.data.last, null, 'streak cleared');
+  assert.equal(m.store.data.offFrom, null, 'off-gap cleared');
+  // A circulating reading right after load is NOT yet reliable (must re-settle).
+  assert.equal(m.estimateTemp(100, true, 111 + 10 * 3_600_000).reliable, false);
+});
+
 test('hoursToHeat is 0 at/above target', () => {
   const m = new ThermalModel({ store: fakeStore() });
   assert.equal(m.hoursToHeat(104, 104), 0);

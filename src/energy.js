@@ -31,7 +31,11 @@ export class EnergyMeter {
     }
     if (!('day' in d)) d.day = null;
     if (!('month' in d)) d.month = null;
-    if (!('lastAt' in d)) d.lastAt = null;
+    // Drop any persisted lastAt on load: the interval between the last pre-restart
+    // sample and the first post-restart one covers unknown pump state (the process
+    // was down), so billing it against the stale wattage would invent energy. The
+    // first sample after a restart just re-primes.
+    d.lastAt = null;
     d.lastInPeak = !!d.lastInPeak;
     d.lastOverridden = !!d.lastOverridden;
   }

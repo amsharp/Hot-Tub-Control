@@ -34,10 +34,10 @@ export class FlowModel {
 
   /** Inlet/outlet temps in °C from a raw attribute dict, or null if absent. */
   temps(raw) {
-    const tin = raw[this.inlet.key];
-    const tout = raw[this.outlet.key];
-    if (tin == null || tout == null) return null;
-    return { inC: Number(tin) * this.inlet.scale, outC: Number(tout) * this.outlet.scale };
+    const tin = Number(raw[this.inlet.key]);
+    const tout = Number(raw[this.outlet.key]);
+    if (!Number.isFinite(tin) || !Number.isFinite(tout)) return null; // absent/non-numeric
+    return { inC: tin * this.inlet.scale, outC: tout * this.outlet.scale };
   }
 
   /**
