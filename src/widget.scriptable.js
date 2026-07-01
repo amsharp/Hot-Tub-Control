@@ -107,16 +107,14 @@ if (!s) {
 
   // Live draw + estimated circulation flow on one line. Watts jump to ~1.3 kW
   // while the element fires and fall to the ~40 W pump at "maintain". Flow is
-  // derived from the inlet/outlet ΔT across the heater — only measurable while
-  // firing, so we fall back to the last good reading when idle.
+  // derived from the inlet/outlet ΔT across the heater, so it's only known WHILE
+  // firing — when it's not heating we show no flow value rather than a stale one.
   const powerParts = [];
   if (energy && energy.watts != null) powerParts.push(Math.round(energy.watts) + " W");
-  const flow = s.flow;
-  const lpm = flow ? (flow.lpm != null ? flow.lpm : flow.last && flow.last.lpm != null ? flow.last.lpm : null) : null;
-  if (lpm != null) powerParts.push(lpm.toFixed(1) + " L/min");
+  if (s.flow && s.flow.reliable && s.flow.lpm != null) powerParts.push(s.flow.lpm.toFixed(1) + " L/min");
   if (powerParts.length) {
     const pw = w.addText(powerParts.join("   ·   "));
-    pw.font = Font.semiboldSystemFont(12);
+    pw.font = Font.semiboldSystemFont(10);
     pw.textColor = energy && energy.watts >= 1000 ? AMBER : PRIMARY;
   }
 
