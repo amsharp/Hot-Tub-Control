@@ -82,6 +82,10 @@
   }
   .current { font-size: 21px; font-weight: 600; }
   .current .pill { display: inline-block; background: rgba(162,58,48,.14); color: var(--rail-hot); border-radius: 999px; padding: 2px 12px; font-size: 15px; margin-left: 6px; }
+  .energy { border-top: 1px solid rgba(109,103,94,.14); margin-top: 6px; padding-top: 12px; font-size: 13px; color: var(--ink); display: flex; flex-wrap: wrap; gap: 4px 16px; justify-content: space-between; }
+  .energy .k { color: var(--ink-soft); }
+  .energy b { font-weight: 700; }
+  .energy .ovr { color: var(--rail-hot); width: 100%; font-size: 12px; }
   .msg { text-align: center; min-height: 20px; font-size: 13px; color: var(--ink-soft); padding-top: 8px; }
   .msg.err { color: var(--rail-hot); }
   .offline { text-align:center; font-size:13px; color: var(--rail-hot); font-weight:600; }
@@ -133,6 +137,7 @@
         </div>
       </div>
 
+      <div class="energy" id="energy"></div>
       <div class="msg" id="msg"></div>
     </div>
   </div>
@@ -188,7 +193,20 @@
     if (s.targetTemp != null && !dragging) { $("slider").value = clampF(s.targetTemp); setBig(s.targetTemp); }
   }
 
+  function renderEnergy(e) {
+    if (!e || e.monthKwh == null) return;
+    var html =
+      '<span><span class="k">Now</span> <b>' + Math.round(e.watts) + ' W</b></span>' +
+      '<span><span class="k">Today</span> <b>' + e.todayKwh.toFixed(1) + ' kWh</b></span>' +
+      '<span><span class="k">This month</span> <b>' + Math.round(e.monthKwh) + ' kWh · $' + (e.monthCost || 0).toFixed(0) + '</b></span>';
+    if (e.overrideCost >= 0.5) {
+      html += '<span class="ovr">Manual overrides this month: ' + Math.round(e.overrideKwh) + ' kWh · $' + e.overrideCost.toFixed(0) + '</span>';
+    }
+    $("energy").innerHTML = html;
+  }
+
   function refresh() {
+    api("/api/energy").then(renderEnergy).catch(function () {});
     return api("/api/status").then(render).catch(function (e) { if (e.message !== "unauthorized") msg("Offline", true); });
   }
 

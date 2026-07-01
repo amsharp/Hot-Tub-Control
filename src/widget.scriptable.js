@@ -30,8 +30,10 @@ w.url = BASE; // tap opens the full controls
 
 let s = null;
 let samples = [];
+let energy = null;
 try { s = await getJSON(`/api/status?token=${TOKEN}`); } catch (e) {}
 try { const h = await getJSON(`/api/history?token=${TOKEN}`); samples = (h && h.samples) || []; } catch (e) {}
+try { energy = await getJSON(`/api/energy?token=${TOKEN}`); } catch (e) {}
 
 if (!s) {
   const t = w.addText("Hot tub — offline");
@@ -90,7 +92,14 @@ if (!s) {
   }
 
   w.addSpacer(); // push footer to the bottom edge
-  const foot = w.addText(samples.length >= 2 ? "last 24h · set " + Math.round(s.targetTemp) + "°F" : "24h chart builds hourly");
+  let footText;
+  if (energy && energy.monthKwh != null) {
+    footText = Math.round(energy.monthKwh) + " kWh · $" + (energy.monthCost || 0).toFixed(0) + " this month";
+    if (energy.overrideCost >= 0.5) footText += "  ·  $" + energy.overrideCost.toFixed(0) + " override";
+  } else {
+    footText = samples.length >= 2 ? "last 24h" : "24h chart builds hourly";
+  }
+  const foot = w.addText(footText);
   foot.font = Font.systemFont(9);
   foot.textColor = SECOND;
 }

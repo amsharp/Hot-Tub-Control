@@ -24,6 +24,21 @@ test('accumulates kWh over sampled intervals', () => {
   assert.ok(Math.abs(s.todayCost - 0.536) < 0.001, `~$0.54 (${s.todayCost})`);
 });
 
+test('attributes override + peak energy to their buckets at the peak rate', () => {
+  const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1000, pump: 0, blower: 0 }, rate: 0.3, ratePeak: 0.6 });
+  // interval 1: normal off-peak run
+  m.sample({ raw: { heat: 3 } }, 0, 20260701, 202607, { inPeak: false, overridden: false });
+  m.sample({ raw: { heat: 3 } }, H, 20260701, 202607, { inPeak: true, overridden: true }); // 1 kWh off-peak (prev ctx), then flag peak+override
+  m.sample({ raw: { heat: 3 } }, 2 * H, 20260701, 202607, { inPeak: false, overridden: false }); // 1 kWh at peak+override
+  const s = m.summary();
+  assert.ok(Math.abs(s.monthKwh - 2) < 0.01, `2 kWh total (${s.monthKwh})`);
+  assert.ok(Math.abs(s.overrideKwh - 1) < 0.01, `1 kWh override (${s.overrideKwh})`);
+  assert.ok(Math.abs(s.peakKwh - 1) < 0.01, `1 kWh peak (${s.peakKwh})`);
+  // costs: 1 kWh @ 0.30 (off-peak) + 1 kWh @ 0.60 (peak) = 0.90; override cost = the peak kWh = 0.60
+  assert.ok(Math.abs(s.monthCost - 0.9) < 0.01, `$0.90 total (${s.monthCost})`);
+  assert.ok(Math.abs(s.overrideCost - 0.6) < 0.01, `$0.60 override (${s.overrideCost})`);
+});
+
 test('resets the daily total on a new day but keeps the monthly total', () => {
   const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1000, pump: 0, blower: 0 } });
   m.sample({ raw: { heat: 3 } }, 0, 20260701, 202607);

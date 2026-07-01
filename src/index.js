@@ -46,6 +46,7 @@ async function main() {
   const meter = new EnergyMeter({
     watts: { heater: config.energy.heaterW, pump: config.energy.pumpW, blower: config.energy.blowerW },
     rate: config.energy.rate,
+    ratePeak: config.energy.ratePeak || config.energy.rate,
   });
 
   // Self-calibrating heat model + smart pre-heat planner.
@@ -134,14 +135,6 @@ async function main() {
     } catch (err) {
       log.warn('History record failed:', err.message);
     }
-    // Energy estimate runs regardless of temp reliability.
-    try {
-      const { day } = localNow();
-      meter.sample(status, Date.now(), day, Math.floor(day / 100));
-    } catch (err) {
-      log.warn('Energy sample failed:', err.message);
-    }
-
     if (tempF != null) {
       const now = Date.now();
       const circulating = !!status.filter; // sensor only reads true temp while circulating
@@ -158,6 +151,15 @@ async function main() {
           log.warn('SmartHeat failed:', err.message);
         }
       }
+    }
+
+    // Energy accounting last, so peak/override context reflects this cycle.
+    try {
+      const { min, day } = localNow();
+      const ctx = { inPeak: planner.inPeak(min), overridden: !!(lastPlan && lastPlan.overridden) };
+      meter.sample(status, Date.now(), day, Math.floor(day / 100), ctx);
+    } catch (err) {
+      log.warn('Energy sample failed:', err.message);
     }
   }
 

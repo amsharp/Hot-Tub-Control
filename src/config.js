@@ -114,7 +114,8 @@ export const config = {
     heaterW: Number(process.env.ENERGY_HEATER_W) || 1300,
     pumpW: Number(process.env.ENERGY_PUMP_W) || 40,
     blowerW: Number(process.env.ENERGY_BLOWER_W) || 600,
-    rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh
+    rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh general/off-peak
+    ratePeak: Number(process.env.ELECTRICITY_RATE_PEAK) || 0, // $/kWh during peak (0 = same as rate)
   },
 
   watchdog: {
