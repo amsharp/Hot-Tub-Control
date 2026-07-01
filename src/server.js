@@ -20,11 +20,18 @@ import { ACTIONS } from './scheduler/scheduler.js';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || config.oauth.clientSecret;
 
 function requireAdmin(req, res, next) {
-  if (!ADMIN_TOKEN || req.get('x-admin-token') !== ADMIN_TOKEN) {
+  // Accept the token via header (HUD) or ?token= query (iOS Shortcuts/Scriptable
+  // widgets, which send plain URLs without custom headers).
+  const token = req.get('x-admin-token') || req.query.token;
+  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
   next();
+}
+
+function truthyParam(v) {
+  return v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
 }
 
 // The web control panel (a SaluSpa-style HUD). The HTML shell is public; every
@@ -137,35 +144,62 @@ export function createServer({ client, scheduler, watchdog }) {
   });
 
   // --- Admin API: direct control --------------------------------------------
+  // Granular, independent controls (used by the web HUD) + the original
+  // convenience actions (on/off = whole-unit heating) for back-compat.
+  async function applyControl({ action, on, celsius, fahrenheit }) {
+    if (action === 'power') await client.setPower(truthyParam(on));
+    else if (action === 'heat') await client.setHeat(truthyParam(on));
+    else if (action === 'filter') await client.setFilter(truthyParam(on));
+    else if (action === 'on') await client.setHeating(true);
+    else if (action === 'off') await client.setHeating(false);
+    else if (action === 'temp') {
+      if (fahrenheit != null && fahrenheit !== '') {
+        await client.setTargetTemperature(Number(fahrenheit), 'F');
+      } else {
+        await client.setTargetTemperature(Number(celsius), 'C');
+      }
+    } else if (action === 'bubbles_on') await client.setBubbles(true);
+    else if (action === 'bubbles_off') await client.setBubbles(false);
+    else {
+      const e = new Error(`unknown action ${action}`);
+      e.status = 400;
+      throw e;
+    }
+  }
+
+  // Respond as soon as the command is accepted; refresh state + push to Google
+  // asynchronously so callers aren't blocked on a second cloud round-trip.
+  function afterControl(res) {
+    res.json({ ok: true });
+    client
+      .getStatus()
+      .then((status) => onStateChange(status))
+      .catch(() => {});
+  }
+
   app.post('/api/control', requireAdmin, async (req, res) => {
     try {
-      const { action, celsius, fahrenheit, on } = req.body;
-      // Granular, independent controls (used by the web HUD) + the original
-      // convenience actions (on/off = whole-unit heating) for back-compat.
-      if (action === 'power') await client.setPower(!!on);
-      else if (action === 'heat') await client.setHeat(!!on);
-      else if (action === 'filter') await client.setFilter(!!on);
-      else if (action === 'on') await client.setHeating(true);
-      else if (action === 'off') await client.setHeating(false);
-      else if (action === 'temp') {
-        if (fahrenheit != null) await client.setTargetTemperature(Number(fahrenheit), 'F');
-        else await client.setTargetTemperature(Number(celsius), 'C');
-      } else if (action === 'bubbles_on') await client.setBubbles(true);
-      else if (action === 'bubbles_off') await client.setBubbles(false);
-      else {
-        res.status(400).json({ error: `unknown action ${action}` });
-        return;
-      }
-      // Respond as soon as the command is accepted; refresh state + push to
-      // Google asynchronously so the caller isn't blocked on a second cloud
-      // round-trip (this is what made the HUD buttons feel laggy).
-      res.json({ ok: true });
-      client
-        .getStatus()
-        .then((status) => onStateChange(status))
-        .catch(() => {});
+      await applyControl(req.body || {});
+      afterControl(res);
     } catch (err) {
-      if (!res.headersSent) res.status(502).json({ error: err.message });
+      if (!res.headersSent) res.status(err.status || 502).json({ error: err.message });
+    }
+  });
+
+  // GET convenience for iOS Shortcuts / Scriptable widgets — a plain URL, e.g.
+  //   /api/q?token=XXX&action=heat&on=1
+  //   /api/q?token=XXX&action=temp&f=104
+  app.get('/api/q', requireAdmin, async (req, res) => {
+    try {
+      await applyControl({
+        action: req.query.action,
+        on: req.query.on,
+        celsius: req.query.c,
+        fahrenheit: req.query.f,
+      });
+      afterControl(res);
+    } catch (err) {
+      if (!res.headersSent) res.status(err.status || 502).json({ error: err.message });
     }
   });
 
