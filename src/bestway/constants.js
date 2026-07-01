@@ -19,20 +19,27 @@ export function apiRootForRegion(region) {
   return API_ROOTS[region] || API_ROOTS.eu;
 }
 
-// Attribute profile for the classic WiFi "Airjet" pump (product_name "Airjet",
-// Gizwits backend). The `attrs` map translates our internal field names to the
-// raw Gizwits attribute keys used in /devdata and /control payloads.
+// Attribute profile for the WiFi "Airjet" pump on the Gizwits backend. The
+// `attrs` map translates our internal field names to the raw Gizwits attribute
+// keys used in /devdata and /control payloads.
+//
+// Verified against a live `Airjet_V01` pump ("Cedar Tub"): this firmware uses
+// short keys (Tnow/Tset/Tunit/heat/filter/wave/power), NOT the longer
+// temp_now/temp_set/heat_power/... keys some older docs list. It also reports
+// temperatures in Fahrenheit even though Tunit reads 0 (word7 carries the °C
+// mirror), so we pin the unit to F via `fixedUnit` rather than trusting Tunit.
 export const AIRJET_PROFILE = {
-  productName: 'Airjet',
+  productName: 'Airjet_V01',
+  fixedUnit: 'F', // this firmware reports/accepts Tnow/Tset in °F
   attrs: {
-    currentTemp: 'temp_now', // current water temperature (integer)
-    targetTemp: 'temp_set', // target temperature (integer)
-    tempUnit: 'temp_set_unit', // 0/"C" Celsius, 1/"F" Fahrenheit
+    currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
+    targetTemp: 'Tset', // target temperature (integer, °F on V01)
+    tempUnit: 'Tunit', // display-unit flag (0 on V01; see fixedUnit above)
     power: 'power', // pump unit power 0/1
-    heat: 'heat_power', // heater 0/1
-    filter: 'filter_power', // filter/circulation pump 0/1
-    bubbles: 'wave_power', // bubble massage (AirJet) 0/1
-    locked: 'locked', // child lock 0/1
+    heat: 'heat', // heater 0/1
+    filter: 'filter', // filter/circulation pump 0/1
+    bubbles: 'wave', // bubble massage (AirJet) 0/1
+    locked: 'locked', // child lock 0/1 (not exposed on V01 → undefined/false)
   },
   on: 1,
   off: 0,

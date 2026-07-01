@@ -172,16 +172,24 @@ export class BestwayClient {
     const attr = await this.rawAttrs(dev.did);
     const a = this.profile.attrs;
     const unitRaw = attr[a.tempUnit];
-    const unit = unitRaw === 1 || unitRaw === '1' || unitRaw === 'F' ? 'F' : 'C';
+    // Some firmwares (e.g. Airjet_V01) report temps in a fixed unit regardless
+    // of the Tunit flag; honor the profile override when present.
+    const unit =
+      this.profile.fixedUnit ||
+      (unitRaw === 1 || unitRaw === '1' || unitRaw === 'F' ? 'F' : 'C');
+    // On Airjet_V01 the heat/filter datapoints are multi-state enums (0 = off,
+    // e.g. 2 = running, 3 = actively heating), not 0/1 booleans. Treat any
+    // non-zero state as "on"; this is also correct for the strict 0/1 fields.
+    const isOn = (v) => v === true || Number(v) > 0;
     return {
       deviceId: dev.did,
       name: dev.dev_alias || dev.product_name || 'Hot tub',
       online: !!dev.is_online,
-      power: toBool(attr[a.power]),
-      heat: toBool(attr[a.heat]),
-      filter: toBool(attr[a.filter]),
-      bubbles: toBool(attr[a.bubbles]),
-      locked: toBool(attr[a.locked]),
+      power: isOn(attr[a.power]),
+      heat: isOn(attr[a.heat]),
+      filter: isOn(attr[a.filter]),
+      bubbles: isOn(attr[a.bubbles]),
+      locked: isOn(attr[a.locked]),
       currentTemp: numOrNull(attr[a.currentTemp]),
       targetTemp: numOrNull(attr[a.targetTemp]),
       unit,

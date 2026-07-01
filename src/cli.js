@@ -102,8 +102,13 @@ async function main() {
       console.log('Heating off.');
       break;
     case 'temp': {
-      const applied = await client.setTargetTemperature(Number(args[0]), 'C');
-      console.log(`Target temperature set to ${applied}°C.`);
+      // Arg is Celsius (as documented); convert to the pump's native unit so
+      // the value lands correctly on Fahrenheit firmwares (e.g. Airjet_V01).
+      const celsius = Number(args[0]);
+      const { unit } = await client.getStatus();
+      const inPumpUnit = unit === 'F' ? Math.round((celsius * 9) / 5 + 32) : celsius;
+      const applied = await client.setTargetTemperature(inPumpUnit, unit);
+      console.log(`Target temperature set to ${applied}°${unit}.`);
       break;
     }
     case 'bubbles':
