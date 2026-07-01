@@ -58,7 +58,7 @@ const HUD_MANIFEST = {
   ],
 };
 
-export function createServer({ client, scheduler, watchdog, history, getPlan, getEnergy }) {
+export function createServer({ client, scheduler, watchdog, history, rawlog, getPlan, getEnergy }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -90,6 +90,12 @@ export function createServer({ client, scheduler, watchdog, history, getPlan, ge
 
   // Estimated power/energy (live watts + daily/monthly kWh + cost).
   app.get('/api/energy', requireAdmin, (_req, res) => res.json(getEnergy ? getEnergy() : {}));
+
+  // Raw Gizwits registers over time (diagnostic — decoding the extra temperature
+  // registers into a flow/filter-health proxy).
+  app.get('/api/raw', requireAdmin, (_req, res) =>
+    res.json({ samples: rawlog ? rawlog.list() : [] }),
+  );
 
   // Seed a synthetic 24h backfill (a realistic warm-up-then-hold curve anchored
   // to the current reading) so the chart isn't empty while real hourly data

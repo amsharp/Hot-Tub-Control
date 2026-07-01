@@ -13,6 +13,7 @@ import { ThermalModel } from './thermal/model.js';
 import { SmartHeatPlanner } from './thermal/planner.js';
 import { EnergyMeter } from './energy.js';
 import { WeatherProvider } from './weather.js';
+import { RawLog } from './rawlog.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -42,6 +43,10 @@ async function main() {
 
   // Rolling hourly temperature history for the widget/HUD chart.
   const history = new History();
+
+  // Diagnostic raw-register capture (for decoding the pump's extra temperature
+  // registers into a flow/filter-health proxy). Diagnostic only.
+  const rawlog = new RawLog();
 
   // Software energy estimator.
   const meter = new EnergyMeter({
@@ -166,6 +171,13 @@ async function main() {
       log.warn('History record failed:', err.message);
     }
 
+    // Raw-register capture runs every cycle in every state (diagnostic only).
+    try {
+      rawlog.record(status, now);
+    } catch (err) {
+      log.warn('Raw log failed:', err.message);
+    }
+
     if (tempF != null && config.smartHeat.enabled) {
       try {
         await runSmartHeat(status, est.tempF, est.reliable);
@@ -227,7 +239,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history, getPlan, getEnergy });
+  const app = createServer({ client, scheduler, watchdog, history, rawlog, getPlan, getEnergy });
 
   // Keep the outdoor forecast fresh (used as the cooling model's ambient). Runs
   // independently of the pump; a no-op when no location is configured.
