@@ -25,6 +25,12 @@ export class SmartHeatPlanner {
     return this.peaks.some((p) => min >= p.start && min < p.end);
   }
 
+  /** End (minutes-of-day) of the peak window containing `min`, else null. */
+  peakEndMin(min) {
+    const w = this.peaks.find((p) => min >= p.start && min < p.end);
+    return w ? w.end : null;
+  }
+
   /**
    * @param {number} currentTemp current water temp (°F)
    * @param {number} nowMin minutes since local midnight

@@ -250,6 +250,17 @@ export class BestwayClient {
     return this.control({ [this.profile.attrs.targetTemp]: clamped }).then(() => clamped);
   }
 
+  /** Full shutdown: power, heater, filter/circulation, and bubbles all off. */
+  setAllOff() {
+    const a = this.profile.attrs;
+    return this.control({
+      [a.power]: this.profile.off,
+      [a.heat]: this.profile.off,
+      [a.filter]: this.profile.off,
+      [a.bubbles]: this.profile.off,
+    });
+  }
+
   /**
    * Convenience used by scheduling/voice: turn the spa "on" means power on +
    * heater on; "off" means heater off (keep filter/pump per `keepFilter`).

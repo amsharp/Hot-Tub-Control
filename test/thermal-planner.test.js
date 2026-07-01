@@ -50,6 +50,12 @@ test('the latch resets on a new day', () => {
   assert.equal(p.plan(100, 700, 2).heat, null); // day 2, before start -> not latched
 });
 
+test('peakEndMin returns the containing peak window end', () => {
+  const p = new SmartHeatPlanner({ model: fakeModel(2), peaks: PEAK });
+  assert.equal(p.peakEndMin(17 * 60), 21 * 60); // 5 PM -> peak ends 9 PM
+  assert.equal(p.peakEndMin(10 * 60), null); // 10 AM -> not in peak
+});
+
 test('fmtMin formats minutes-of-day', () => {
   assert.equal(fmtMin(810), '1:30 PM');
   assert.equal(fmtMin(6 * 60), '6:00 AM');

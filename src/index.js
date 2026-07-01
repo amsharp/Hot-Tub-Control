@@ -51,6 +51,8 @@ async function main() {
     safetyMin: config.smartHeat.safetyMin,
   });
   let lastPlan = null;
+  let smartLastAction = null; // 'on' | 'off' | null — the last command WE issued
+  let overrideUntil = 0; // ms; while now < this, defer to a manual override
 
   function localNow() {
     const d = new Date(); // container TZ (set TZ=America/Los_Angeles)
@@ -61,18 +63,51 @@ async function main() {
   }
 
   async function runSmartHeat(status, tempF) {
+    const now = Date.now();
     const { min, day } = localNow();
     const p = planner.plan(tempF, min, day);
-    lastPlan = { ...p, currentTemp: tempF, nowMin: min, at: Date.now() };
+    const running = !!(status.power || status.heat || status.filter);
+
+    // Detect a manual override (SaluSpa app / Google Home / HUD) that contradicts
+    // our last command, and stand down until the end of the current window so we
+    // don't fight the user.
+    let overrideDetected = false;
+    if (p.heat === false && running && smartLastAction === 'off') {
+      overrideDetected = true; // user turned it on during peak
+    } else if (p.heat === true && !status.heat && smartLastAction === 'on') {
+      overrideDetected = true; // user turned it off during pre-heat
+    }
+    if (overrideDetected) {
+      const endMin = p.inPeak ? planner.peakEndMin(min) : p.targetMin;
+      const untilMs = Math.max(2, (endMin ?? min) - min) * 60_000;
+      overrideUntil = now + untilMs;
+      log.info(`SmartHeat: manual override detected (${p.reason}) — standing down`);
+    }
+    const overridden = now < overrideUntil;
+
+    lastPlan = {
+      ...p,
+      currentTemp: tempF,
+      nowMin: min,
+      overridden,
+      reason: overridden ? 'override' : p.reason,
+      at: now,
+    };
+
+    if (overridden) return; // respect the user
+
     if (p.heat === true && !status.heat) {
       log.info(
         `SmartHeat -> ON (${p.reason}); ~${Number.isFinite(p.needHours) ? p.needHours.toFixed(1) + 'h' : 'max'} to reach ${p.targetF}F`,
       );
       await client.setTargetTemperature(config.smartHeat.targetF, 'F');
       await client.setHeating(true);
-    } else if (p.heat === false && status.heat) {
-      log.info(`SmartHeat -> OFF (${p.reason})`);
-      await client.setHeating(false);
+      smartLastAction = 'on';
+    } else if (p.heat === false && running) {
+      // Peak: kill everything (heater AND pump/circulation).
+      log.info(`SmartHeat -> ALL OFF (${p.reason})`);
+      await client.setAllOff();
+      smartLastAction = 'off';
     }
   }
 
