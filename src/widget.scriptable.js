@@ -84,8 +84,9 @@ if (!s) {
   // taller — so grow the chart height and let a flexible spacer bottom-align.
   const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
   // Chart height tuned via the tools/widget-preview harness so the medium widget
-  // fills vertically without the footer overflowing the rounded bottom.
-  const chartH = fam === "large" ? 165 : 78;
+  // fills vertically without the footer (power+flow line AND money line)
+  // overflowing the rounded bottom corner.
+  const chartH = fam === "large" ? 150 : 60;
 
   w.addSpacer(8);
   const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 600, chartH * 2) : null;
@@ -104,13 +105,19 @@ if (!s) {
 
   w.addSpacer(); // push footer to the bottom edge
 
-  // Live draw: ~1.3 kW while the element fires, dropping to the ~40 W pump once it
-  // reaches target and idles ("maintain").
-  if (energy && energy.watts != null) {
-    const wnow = Math.round(energy.watts);
-    const pw = w.addText(wnow + " W");
-    pw.font = Font.semiboldSystemFont(13);
-    pw.textColor = wnow >= 1000 ? AMBER : wnow > 0 ? PRIMARY : SECOND;
+  // Live draw + estimated circulation flow on one line. Watts jump to ~1.3 kW
+  // while the element fires and fall to the ~40 W pump at "maintain". Flow is
+  // derived from the inlet/outlet ΔT across the heater — only measurable while
+  // firing, so we fall back to the last good reading when idle.
+  const powerParts = [];
+  if (energy && energy.watts != null) powerParts.push(Math.round(energy.watts) + " W");
+  const flow = s.flow;
+  const lpm = flow ? (flow.lpm != null ? flow.lpm : flow.last && flow.last.lpm != null ? flow.last.lpm : null) : null;
+  if (lpm != null) powerParts.push(lpm.toFixed(1) + " L/min");
+  if (powerParts.length) {
+    const pw = w.addText(powerParts.join("   ·   "));
+    pw.font = Font.semiboldSystemFont(12);
+    pw.textColor = energy && energy.watts >= 1000 ? AMBER : PRIMARY;
   }
 
   let footText;

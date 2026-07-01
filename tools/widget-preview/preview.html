@@ -34,7 +34,11 @@
 <script>
 try {
   function num(k, d) { var v = new URLSearchParams(location.search).get(k); return v === null ? d : +v; }
-  var W = num('w', 360), H = num('h', 169), R = num('r', 26);
+  // H is calibrated to the REAL device: a full footer (power+flow line AND money
+  // line) clipped on-device at chart height 78, and reproducing that required
+  // H≈150 — the earlier 169 over-stated the usable height and hid the clip. Keep
+  // 150 as the worst-case medium height so what renders here matches the phone.
+  var W = num('w', 360), H = num('h', 150), R = num('r', 26);
   var padT = num('pt', 16), padS = num('ps', 16), padB = num('pb', 18);
   var chartH = num('ch', 78), chartW = num('cw', 300);
   var nameSz = num('name', 16), bigSz = num('big', 28);
@@ -47,7 +51,7 @@ try {
   hdr.innerHTML =
     '<div class="left">' +
       '<div class="name" style="font-size:' + nameSz + 'px">CEDAR TUB</div>' +
-      '<div class="status" style="font-size:10px;margin-top:2px">HEATING&nbsp;&nbsp;·&nbsp;&nbsp;FILTER ON</div>' +
+      '<div class="status" style="font-size:10px;margin-top:2px">HEATING&nbsp;&nbsp;·&nbsp;&nbsp;PUMP ON</div>' +
     '</div>' +
     '<div class="right">' +
       '<div class="big" style="font-size:' + bigSz + 'px">102°F</div>' +
@@ -82,9 +86,17 @@ try {
     '</svg>';
   card.appendChild(wrap);
 
-  var foot = document.createElement('div'); foot.className = 'foot'; foot.style.fontSize = '9px';
-  foot.textContent = 'last 24h · set 104°F';
-  card.appendChild(foot);
+  // Footer block: power+flow line (12px semibold amber) above the money line
+  // (9px grey), the whole block pushed to the bottom by margin-top:auto — mirrors
+  // the widget's addSpacer() + two text lines.
+  var footWrap = document.createElement('div'); footWrap.style.marginTop = 'auto';
+  var powerLine = document.createElement('div');
+  powerLine.style.cssText = 'font-size:12px;font-weight:600;color:#fdd663';
+  powerLine.textContent = '1340 W   ·   4.7 L/min';
+  var money = document.createElement('div'); money.className = 'foot'; money.style.cssText = 'font-size:9px;margin-top:1px';
+  money.textContent = '3 kWh · $1 this month';
+  footWrap.appendChild(powerLine); footWrap.appendChild(money);
+  card.appendChild(footWrap);
   document.title = 'ready';
 } catch (e) { document.title = 'ERR:' + e.message; }
 </script>
