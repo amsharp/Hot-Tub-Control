@@ -68,7 +68,9 @@ export function createServer({ client, scheduler, watchdog, history }) {
   // Web HUD (control panel) + its home-screen app assets.
   app.get(['/', '/hud'], (_req, res) => res.type('html').send(HUD_HTML));
   app.get('/setup', (_req, res) => res.type('html').send(SETUP_HTML));
-  app.get('/widget.js', (_req, res) => res.type('application/javascript').send(WIDGET_JS));
+  app.get('/widget.js', (_req, res) =>
+    res.type('application/javascript').set('Cache-Control', 'no-store').send(WIDGET_JS),
+  );
   app.get('/icon.png', (_req, res) => res.type('png').send(HUD_ICON));
   app.get('/manifest.json', (_req, res) => res.json(HUD_MANIFEST));
 
