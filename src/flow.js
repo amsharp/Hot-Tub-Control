@@ -51,15 +51,34 @@ export class FlowModel {
     const firing = Number(raw.heat) >= 3;
     const pumpOn = !!(status && status.filter) || Number(raw.filter) > 0;
     const t = this.temps(raw);
-    const base = { lpm: null, dTc: t ? round1(t.outC - t.inC) : null, firing, pumpOn, reliable: false, last: this.last };
-    if (!firing || !pumpOn || !t) return base;
+    const dTc = t ? t.outC - t.inC : null;
 
-    const dTc = t.outC - t.inC;
-    if (!(dTc > this.minDeltaC)) return { ...base, dTc: round1(dTc) };
+    // A live estimate needs the element firing, the pump circulating, and a ΔT
+    // above the noise floor. Only then do we update the last good reading.
+    let lpm = null;
+    let reliable = false;
+    if (firing && pumpOn && dTc != null && dTc > this.minDeltaC) {
+      // ṁ = P/(c·ΔT) [kg/s]; Q = ṁ/ρ [L/s]; ×60 -> L/min.
+      lpm = round1(((this.heaterW / (C_WATER_J * dTc)) / RHO) * 60);
+      reliable = true;
+      this.last = { lpm, dTc: round1(dTc), at: now };
+    }
 
-    // ṁ = P/(c·ΔT) [kg/s]; Q = ṁ/ρ [L/s]; ×60 -> L/min.
-    const lpm = round1(((this.heaterW / (C_WATER_J * dTc)) / RHO) * 60);
-    this.last = { lpm, dTc: round1(dTc), at: now };
-    return { lpm, dTc: round1(dTc), inC: round1(t.inC), outC: round1(t.outC), firing, pumpOn, reliable: true, last: this.last };
+    // Value to display: 0 when the pump is off (no circulation → no flow); the
+    // live estimate while firing; otherwise the last good reading (the pump is
+    // still circulating, we just can't measure without heat input).
+    const shown = !pumpOn ? 0 : reliable ? lpm : this.last ? this.last.lpm : null;
+
+    return {
+      lpm,
+      shown,
+      dTc: dTc == null ? null : round1(dTc),
+      inC: t ? round1(t.inC) : null,
+      outC: t ? round1(t.outC) : null,
+      firing,
+      pumpOn,
+      reliable,
+      last: this.last,
+    };
   }
 }

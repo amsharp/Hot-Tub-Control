@@ -11,22 +11,25 @@ test('estimates flow from ΔT while the element fires', () => {
   assert.equal(r.dTc, 3); // 41 − 38.0
   // 1320 / (4186 · 3) · 60 ≈ 6.3 L/min
   assert.ok(Math.abs(r.lpm - 6.3) < 0.2, `~6.3 L/min (${r.lpm})`);
+  assert.equal(r.shown, r.lpm); // shows the live value while firing
 });
 
-test('no estimate when the heater is idle (heat=2) — keeps last good reading', () => {
+test('heater idle (heat=2) but pump on — shows the last good reading', () => {
   const m = new FlowModel({ heaterW: 1320 });
-  m.compute({ filter: true, raw: { heat: 3, filter: 2, word2: 380, word7: 41 } }); // prime last
+  const primed = m.compute({ filter: true, raw: { heat: 3, filter: 2, word2: 380, word7: 41 } }); // prime last
   const r = m.compute({ filter: true, raw: { heat: 2, filter: 2, word2: 400, word7: 40 } });
   assert.equal(r.reliable, false);
   assert.equal(r.lpm, null);
-  assert.ok(r.last && r.last.lpm > 0, 'last good reading retained');
+  assert.equal(r.shown, primed.lpm); // holds the last good reading while circulating
 });
 
-test('no estimate when the pump is off', () => {
+test('pump off — flow shown is 0, not a stale value', () => {
   const m = new FlowModel({ heaterW: 1320 });
-  const r = m.compute({ filter: false, raw: { heat: 3, filter: 0, word2: 380, word7: 41 } });
+  m.compute({ filter: true, raw: { heat: 3, filter: 2, word2: 380, word7: 41 } }); // prime a last reading
+  const r = m.compute({ filter: false, raw: { heat: 0, filter: 0, word2: 380, word7: 41 } });
   assert.equal(r.reliable, false);
   assert.equal(r.lpm, null);
+  assert.equal(r.shown, 0); // no circulation -> 0, overriding last good reading
 });
 
 test('rising ΔT (clogging filter) reads as lower flow', () => {
