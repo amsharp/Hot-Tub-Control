@@ -123,8 +123,8 @@ if (!s) {
 
   let footText;
   if (energy && energy.monthKwh != null) {
-    footText = Math.round(energy.monthKwh) + " kWh · $" + (energy.monthCost || 0).toFixed(0) + " this month";
-    if (energy.overrideCost >= 0.5) footText += "  ·  $" + energy.overrideCost.toFixed(0) + " override";
+    footText = Math.round(energy.monthKwh) + " kWh · $" + (energy.monthCost || 0).toFixed(2) + " this month";
+    if (energy.overrideCost >= 0.01) footText += "  ·  $" + energy.overrideCost.toFixed(2) + " override";
   } else {
     footText = samples.length >= 2 ? "last 24h" : "24h chart builds hourly";
   }
