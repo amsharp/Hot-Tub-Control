@@ -35,6 +35,20 @@ async function main() {
     onAfterAction: (status) => reportState(status),
   });
 
+  // Keep the pump pinned to the preferred display unit (a power-cycle resets it
+  // to Celsius). Fires on startup and on every watchdog cycle.
+  async function enforceUnit(status) {
+    if (!config.bestway.enforceUnit || !status) return;
+    if (status.unit !== config.bestway.enforceUnit) {
+      log.info(`Pump display unit is ${status.unit}; enforcing ${config.bestway.enforceUnit}.`);
+      try {
+        await client.setDisplayUnit(config.bestway.enforceUnit);
+      } catch (err) {
+        log.warn('Could not enforce display unit:', err.message);
+      }
+    }
+  }
+
   const watchdog = new FaultWatchdog({
     client,
     autoClear: config.watchdog.autoClear,
@@ -42,6 +56,7 @@ async function main() {
     maxAttempts: config.watchdog.maxAttempts,
     cooldownMs: config.watchdog.cooldownMs,
     onRecovered: (status) => reportState(status),
+    onStatus: enforceUnit,
   });
 
   const app = createServer({ client, scheduler, watchdog });
@@ -52,6 +67,7 @@ async function main() {
     try {
       const status = await client.getStatus();
       log.info('Connected to spa:', status.name, `(${status.deviceId})`);
+      await enforceUnit(status);
     } catch (err) {
       log.warn('Could not read spa status on startup:', err.message);
     }

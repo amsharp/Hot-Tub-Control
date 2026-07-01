@@ -29,6 +29,7 @@ export class FaultWatchdog {
     cooldownMs = 15 * 60_000,
     recheckDelayMs = 60_000,
     onRecovered,
+    onStatus,
     wait = sleep,
     now = () => Date.now(),
   } = {}) {
@@ -39,6 +40,7 @@ export class FaultWatchdog {
     this.cooldownMs = cooldownMs;
     this.recheckDelayMs = recheckDelayMs;
     this.onRecovered = onRecovered;
+    this.onStatus = onStatus;
     this.wait = wait;
     this.now = now;
     // Per-code recovery state: code -> { attempts, lastAttemptAt, notified }
@@ -103,6 +105,14 @@ export class FaultWatchdog {
    */
   async check() {
     const status = await this.client.getStatus();
+    // Let callers observe every status read (e.g. to enforce the display unit).
+    if (this.onStatus) {
+      try {
+        await this.onStatus(status);
+      } catch (err) {
+        log.warn('onStatus hook failed:', err.message);
+      }
+    }
     const faults = status.faults || [];
 
     if (!faults.length) {

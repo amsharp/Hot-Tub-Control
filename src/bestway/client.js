@@ -172,11 +172,17 @@ export class BestwayClient {
     const attr = await this.rawAttrs(dev.did);
     const a = this.profile.attrs;
     const unitRaw = attr[a.tempUnit];
-    // Some firmwares (e.g. Airjet_V01) report temps in a fixed unit regardless
-    // of the Tunit flag; honor the profile override when present.
-    const unit =
-      this.profile.fixedUnit ||
-      (unitRaw === 1 || unitRaw === '1' || unitRaw === 'F' ? 'F' : 'C');
+    // Derive the active display unit from the raw Tunit value. Airjet_V01 maps
+    // 0->F, 1->C (see AIRJET_PROFILE.tempUnitValues); fall back to the common
+    // 1->F convention if a profile doesn't declare a mapping.
+    const uv = this.profile.tempUnitValues;
+    const unit = uv
+      ? Number(unitRaw) === uv.C
+        ? 'C'
+        : 'F'
+      : unitRaw === 1 || unitRaw === '1' || unitRaw === 'F'
+        ? 'F'
+        : 'C';
     // On Airjet_V01 the heat/filter datapoints are multi-state enums (0 = off,
     // e.g. 2 = running, 3 = actively heating), not 0/1 booleans. Treat any
     // non-zero state as "on"; this is also correct for the strict 0/1 fields.
@@ -220,6 +226,17 @@ export class BestwayClient {
 
   setBubbles(on) {
     return this.control({ [this.profile.attrs.bubbles]: on ? this.profile.on : this.profile.off });
+  }
+
+  /**
+   * Set the pump's display unit ("C" | "F"). The pump converts the stored
+   * temperatures to the new unit. Used to keep it pinned to a preferred unit,
+   * since a mains power-cycle resets it to the firmware default (Celsius).
+   */
+  setDisplayUnit(unit) {
+    const uv = this.profile.tempUnitValues || { C: 0, F: 1 };
+    const u = unit === 'C' ? 'C' : 'F';
+    return this.control({ [this.profile.attrs.tempUnit]: uv[u] });
   }
 
   /**

@@ -61,8 +61,33 @@ test('getStatus parses Airjet_V01 attributes (Tnow/Tset/heat/... in °F)', async
   assert.equal(status.bubbles, false);
   assert.equal(status.currentTemp, 91);
   assert.equal(status.targetTemp, 104);
-  // Airjet_V01 reports Fahrenheit even though Tunit reads 0 (profile.fixedUnit).
+  // Airjet_V01: Tunit=0 -> Fahrenheit.
   assert.equal(status.unit, 'F');
+});
+
+test('getStatus reads Celsius mode (Tunit=1)', async () => {
+  const attr = { Tnow: 39, Tset: 40, Tunit: 1, power: 1, heat: 0, filter: 0, wave: 0 };
+  const client = new BestwayClient({
+    username: 'a',
+    password: 'b',
+    fetchImpl: fakeFetch(baseRoutes(attr)),
+  });
+  const status = await client.getStatus();
+  assert.equal(status.unit, 'C');
+  assert.equal(status.currentTemp, 39);
+  assert.equal(status.targetTemp, 40);
+});
+
+test('setDisplayUnit writes the mapped Tunit value', async () => {
+  const recorder = [];
+  const client = new BestwayClient({
+    username: 'a',
+    password: 'b',
+    fetchImpl: fakeFetch(baseRoutes({ Tnow: 90, Tset: 90, Tunit: 1 }, recorder), recorder),
+  });
+  await client.setDisplayUnit('F');
+  const control = recorder.find((r) => r.key.startsWith('POST /app/control'));
+  assert.deepEqual(control.body, { attrs: { Tunit: 0 } }); // F -> 0 on this firmware
 });
 
 test('setTargetTemperature clamps and sends Tset', async () => {

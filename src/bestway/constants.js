@@ -25,16 +25,20 @@ export function apiRootForRegion(region) {
 //
 // Verified against a live `Airjet_V01` pump ("Cedar Tub"): this firmware uses
 // short keys (Tnow/Tset/Tunit/heat/filter/wave/power), NOT the longer
-// temp_now/temp_set/heat_power/... keys some older docs list. It also reports
-// temperatures in Fahrenheit even though Tunit reads 0 (word7 carries the °C
-// mirror), so we pin the unit to F via `fixedUnit` rather than trusting Tunit.
+// temp_now/temp_set/heat_power/... keys some older docs list.
+//
+// The display unit lives in `Tunit`, but INVERTED from the usual convention on
+// this firmware: Tunit=0 -> Fahrenheit, Tunit=1 -> Celsius (verified live —
+// Tunit=0 read Tnow=102/Tset=104 °F; Tunit=1 read Tnow=39/Tset=40 °C). Tnow/Tset
+// are always in the active unit; `tempUnitValues` maps our unit name to the raw
+// Tunit value so we can both read and *write* it (a power-cycle resets it to C).
 export const AIRJET_PROFILE = {
   productName: 'Airjet_V01',
-  fixedUnit: 'F', // this firmware reports/accepts Tnow/Tset in °F
+  tempUnitValues: { F: 0, C: 1 }, // raw Tunit value for each unit (this firmware)
   attrs: {
     currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
     targetTemp: 'Tset', // target temperature (integer, °F on V01)
-    tempUnit: 'Tunit', // display-unit flag (0 on V01; see fixedUnit above)
+    tempUnit: 'Tunit', // display-unit flag (see tempUnitValues: 0=F, 1=C on V01)
     power: 'power', // pump unit power 0/1
     heat: 'heat', // heater 0/1
     filter: 'filter', // filter/circulation pump 0/1

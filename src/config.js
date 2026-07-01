@@ -49,6 +49,15 @@ export const config = {
     password: process.env.BESTWAY_PASSWORD || '',
     region: (process.env.BESTWAY_REGION || 'eu').toLowerCase(),
     deviceId: process.env.BESTWAY_DEVICE_ID || '',
+    // Keep the pump pinned to this display unit ("F" | "C"). A mains power-cycle
+    // resets the pump to Celsius; when set, the service flips it back on startup
+    // and on every watchdog cycle. Leave empty to leave the pump's unit alone.
+    enforceUnit:
+      (process.env.ENFORCE_UNIT || '').toUpperCase() === 'F'
+        ? 'F'
+        : (process.env.ENFORCE_UNIT || '').toUpperCase() === 'C'
+          ? 'C'
+          : null,
   },
 
   oauth: {
