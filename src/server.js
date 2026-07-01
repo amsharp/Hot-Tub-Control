@@ -29,7 +29,23 @@ function requireAdmin(req, res, next) {
 
 // The web control panel (a SaluSpa-style HUD). The HTML shell is public; every
 // control/read call it makes is gated by the admin token entered in the page.
-const HUD_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'hud.html'), 'utf8');
+const HUD_DIR = dirname(fileURLToPath(import.meta.url));
+const HUD_HTML = readFileSync(join(HUD_DIR, 'hud.html'), 'utf8');
+const HUD_ICON = readFileSync(join(HUD_DIR, 'icon.png'));
+// Web-app manifest so the HUD installs to the home screen as a standalone app.
+const HUD_MANIFEST = {
+  name: 'Hot Tub',
+  short_name: 'Hot Tub',
+  start_url: '/',
+  scope: '/',
+  display: 'standalone',
+  background_color: '#b5aa9c',
+  theme_color: '#b5aa9c',
+  icons: [
+    { src: '/icon.png', sizes: '192x192', type: 'image/png' },
+    { src: '/icon.png', sizes: '512x512', type: 'image/png' },
+  ],
+};
 
 export function createServer({ client, scheduler, watchdog }) {
   const app = express();
@@ -38,8 +54,10 @@ export function createServer({ client, scheduler, watchdog }) {
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-  // Web HUD (control panel).
+  // Web HUD (control panel) + its home-screen app assets.
   app.get(['/', '/hud'], (_req, res) => res.type('html').send(HUD_HTML));
+  app.get('/icon.png', (_req, res) => res.type('png').send(HUD_ICON));
+  app.get('/manifest.json', (_req, res) => res.json(HUD_MANIFEST));
 
   // Force a watchdog cycle now (check faults, auto-clear if applicable).
   app.post('/api/recover', requireAdmin, async (_req, res) => {
