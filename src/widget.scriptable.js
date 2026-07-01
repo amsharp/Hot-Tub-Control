@@ -8,6 +8,7 @@ const BG = new Color("#202124");
 const PRIMARY = new Color("#e8eaed");
 const SECOND = new Color("#9aa0a6");
 const AMBER = new Color("#fdd663");
+const GREEN = new Color("#81c995"); // "maintain" — at target, heater idling
 const RED = new Color("#f28b82");
 
 async function getJSON(path) {
@@ -40,7 +41,13 @@ if (!s) {
   t.textColor = RED;
   t.font = Font.semiboldSystemFont(15);
 } else {
-  const heating = !!s.heat;
+  // Distinguish the element actively firing (raw heat 3 -> HEATING) from merely
+  // holding at target (raw heat 2 -> MAINTAIN, low draw). The pump/circulation is
+  // the "filter" datapoint — label it PUMP.
+  const rawHeat = s.raw && s.raw.heat != null ? Number(s.raw.heat) : s.heat ? 3 : 0;
+  const firing = rawHeat >= 3;
+  const maintaining = rawHeat === 2;
+  const pumpOn = s.raw && s.raw.filter != null ? Number(s.raw.filter) > 0 : !!s.filter;
   const faulted = s.faults && s.faults.length;
 
   const top = w.addStack();
@@ -49,12 +56,16 @@ if (!s) {
   const name = left.addText((s.name || "HOT TUB").toUpperCase());
   name.font = Font.boldSystemFont(16);
   name.textColor = PRIMARY;
-  const statusTxt =
-    (faulted ? "FAULT " + s.faults.map((f) => f.code).join(",") : heating ? "HEATING" : "IDLE") +
-    "   ·   FILTER " + (s.filter ? "ON" : "OFF");
-  const st = left.addText(statusTxt);
+  const stateTxt = faulted
+    ? "FAULT " + s.faults.map((f) => f.code).join(",")
+    : firing
+      ? "HEATING"
+      : maintaining
+        ? "MAINTAIN"
+        : "IDLE";
+  const st = left.addText(stateTxt + "   ·   PUMP " + (pumpOn ? "ON" : "OFF"));
   st.font = Font.semiboldSystemFont(10);
-  st.textColor = faulted ? RED : heating ? AMBER : SECOND;
+  st.textColor = faulted ? RED : firing ? AMBER : maintaining ? GREEN : SECOND;
 
   top.addSpacer();
 
@@ -92,6 +103,16 @@ if (!s) {
   }
 
   w.addSpacer(); // push footer to the bottom edge
+
+  // Live draw: ~1.3 kW while the element fires, dropping to the ~40 W pump once it
+  // reaches target and idles ("maintain").
+  if (energy && energy.watts != null) {
+    const wnow = Math.round(energy.watts);
+    const pw = w.addText(wnow + " W");
+    pw.font = Font.semiboldSystemFont(13);
+    pw.textColor = wnow >= 1000 ? AMBER : wnow > 0 ? PRIMARY : SECOND;
+  }
+
   let footText;
   if (energy && energy.monthKwh != null) {
     footText = Math.round(energy.monthKwh) + " kWh · $" + (energy.monthCost || 0).toFixed(0) + " this month";
