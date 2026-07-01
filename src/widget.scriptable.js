@@ -22,9 +22,10 @@ async function getJSON(path) {
 
 const w = new ListWidget();
 w.backgroundColor = BG;
-// Extra bottom inset so the footer clears the widget's rounded corner (small
-// text placed right in the corner curve gets its first glyph clipped).
-w.setPadding(14, 16, 22, 16);
+// One uniform inset on every side so all elements sit inside a safe rounded box
+// and the top-right temp has equal whitespace to the top and side edges.
+const PAD = 20;
+w.setPadding(PAD, PAD, PAD, PAD);
 w.url = BASE; // tap opens the full controls
 
 let s = null;
@@ -69,13 +70,13 @@ if (!s) {
   // Size the chart to the widget: medium and large are the same width, large is
   // taller — so grow the chart height and let a flexible spacer bottom-align.
   const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
-  const chartH = fam === "large" ? 150 : 58;
+  const chartH = fam === "large" ? 148 : 54;
 
   w.addSpacer(8);
-  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 656, chartH * 2) : null;
+  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 570, chartH * 2) : null;
   if (img) {
     const wi = w.addImage(img);
-    wi.imageSize = new Size(328, chartH);
+    wi.imageSize = new Size(285, chartH);
     wi.centerAlignImage();
   } else {
     w.addSpacer(Math.max(4, chartH / 2 - 8));
