@@ -156,11 +156,16 @@ export function createServer({ client, scheduler, watchdog }) {
         res.status(400).json({ error: `unknown action ${action}` });
         return;
       }
-      const status = await client.getStatus();
-      onStateChange(status);
-      res.json({ ok: true, status });
+      // Respond as soon as the command is accepted; refresh state + push to
+      // Google asynchronously so the caller isn't blocked on a second cloud
+      // round-trip (this is what made the HUD buttons feel laggy).
+      res.json({ ok: true });
+      client
+        .getStatus()
+        .then((status) => onStateChange(status))
+        .catch(() => {});
     } catch (err) {
-      res.status(502).json({ error: err.message });
+      if (!res.headersSent) res.status(502).json({ error: err.message });
     }
   });
 

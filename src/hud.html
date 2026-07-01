@@ -150,7 +150,7 @@
 (function () {
   var KEY = "htc_admin_token";
   var token = localStorage.getItem(KEY) || "";
-  var busy = false, dragging = false, pollTimer = null;
+  var dragging = false, pollTimer = null, holdUntil = 0;
 
   function $(id) { return document.getElementById(id); }
   function gate(show) { $("gate").classList.toggle("show", show); }
@@ -169,53 +169,60 @@
     if (text && !isErr) setTimeout(function () { if ($("msg").textContent === text) $("msg").textContent = ""; }, 2500);
   }
 
+  function setBig(v) { $("bigtemp").innerHTML = Math.round(v) + '<span class="u">&deg;F</span>'; }
+  function clampF(v) { return Math.max(68, Math.min(104, Math.round(v))); }
+  function setPowerVisual(on) { $("power").classList.toggle("off", !on); }
+  function setToggleVisual(id, on) { $(id).setAttribute("data-on", String(!!on)); }
+
   function render(s) {
     if (!s || s.error) { msg(s && s.error ? s.error : "Read failed", true); return; }
     $("brand").textContent = (s.name || "HOT TUB").toUpperCase();
     $("offline").style.display = s.online ? "none" : "block";
-    var pw = $("power"); pw.classList.toggle("off", !s.power);
-    $("heat").setAttribute("data-on", String(!!s.heat));
-    $("filter").setAttribute("data-on", String(!!s.filter));
     if (s.currentTemp != null) $("current").innerHTML = Math.round(s.currentTemp) + " &deg;F";
-    if (s.targetTemp != null && !dragging) {
-      $("slider").value = clampF(s.targetTemp);
-      setBig(s.targetTemp);
-    }
+    // While a command is settling (the cloud takes a few seconds to report the
+    // new state), keep the optimistic UI — don't let a stale read snap it back.
+    if (Date.now() < holdUntil) return;
+    setPowerVisual(s.power);
+    setToggleVisual("heat", s.heat);
+    setToggleVisual("filter", s.filter);
+    if (s.targetTemp != null && !dragging) { $("slider").value = clampF(s.targetTemp); setBig(s.targetTemp); }
   }
-  function setBig(v) { $("bigtemp").innerHTML = Math.round(v) + '<span class="u">&deg;F</span>'; }
-  function clampF(v) { return Math.max(68, Math.min(104, Math.round(v))); }
 
   function refresh() {
     return api("/api/status").then(render).catch(function (e) { if (e.message !== "unauthorized") msg("Offline", true); });
   }
 
-  function control(payload, note) {
-    if (busy) return; busy = true; msg(note || "Working...");
+  // Optimistic: the caller already flipped the control visually; just send it
+  // and hold the reconciliation briefly so it doesn't flicker back.
+  function control(payload) {
+    holdUntil = Date.now() + 12000;
     api("/api/control", { method: "POST", body: JSON.stringify(payload) })
-      .then(function (r) { if (r && r.status) render(r.status); msg(""); })
-      .catch(function (e) { if (e.message !== "unauthorized") msg("Command failed", true); })
-      .finally(function () { busy = false; });
+      .then(function () { msg("Done", false); })
+      .catch(function (e) { if (e.message !== "unauthorized") { msg("Command failed", true); holdUntil = 0; refresh(); } });
   }
 
-  // Power toggles the whole unit.
   $("power").onclick = function () {
     var turningOn = $("power").classList.contains("off");
-    control({ action: "power", on: turningOn }, turningOn ? "Powering on..." : "Powering off...");
+    setPowerVisual(turningOn);                    // instant feedback
+    control({ action: "power", on: turningOn });
   };
   $("heat").onclick = function () {
     var on = this.getAttribute("data-on") !== "true";
-    control({ action: "heat", on: on }, on ? "Heat on..." : "Heat off...");
+    setToggleVisual("heat", on);                  // instant feedback
+    control({ action: "heat", on: on });
   };
   $("filter").onclick = function () {
     var on = this.getAttribute("data-on") !== "true";
-    control({ action: "filter", on: on }, on ? "Filter on..." : "Filter off...");
+    setToggleVisual("filter", on);                // instant feedback
+    control({ action: "filter", on: on });
   };
 
   var slider = $("slider");
   slider.addEventListener("input", function () { dragging = true; setBig(this.value); });
   function commitTemp() {
     dragging = false;
-    control({ action: "temp", fahrenheit: Number(slider.value) }, "Set " + slider.value + " °F");
+    setBig(slider.value);                         // instant feedback
+    control({ action: "temp", fahrenheit: Number(slider.value) });
   }
   slider.addEventListener("change", commitTemp);
 
@@ -226,7 +233,7 @@
   };
   $("token").addEventListener("keydown", function (e) { if (e.key === "Enter") $("tokenSave").click(); });
 
-  function startPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(function () { if (!busy && !dragging) refresh(); }, 10000); }
+  function startPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(function () { if (!dragging && Date.now() >= holdUntil) refresh(); }, 8000); }
 
   if (!token) { gate(true); } else { refresh(); }
   startPolling();
