@@ -146,8 +146,19 @@ export const config = {
     heaterW: Number(process.env.ENERGY_HEATER_W) || 1300,
     pumpW: Number(process.env.ENERGY_PUMP_W) || 40,
     blowerW: Number(process.env.ENERGY_BLOWER_W) || 600,
-    rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh general/off-peak
+    rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh fallback (TOU disabled)
     ratePeak: Number(process.env.ELECTRICITY_RATE_PEAK) || 0, // $/kWh during peak (0 = same as rate)
+    // SCE TOU-D-PRIME time-of-use pricing (bundled $/kWh). On by default; set
+    // TOU_ENABLED=false to fall back to the flat rate/ratePeak pair. Defaults
+    // are the published TOU-D-PRIME rates; override any single period via env.
+    tou: {
+      enabled: bool(process.env.TOU_ENABLED, true),
+      summerOn: Number(process.env.TOU_SUMMER_ON) || 0,
+      summerOff: Number(process.env.TOU_SUMMER_OFF) || 0,
+      winterMid: Number(process.env.TOU_WINTER_MID) || 0,
+      winterSoff: Number(process.env.TOU_WINTER_SOFF) || 0,
+      winterOff: Number(process.env.TOU_WINTER_OFF) || 0,
+    },
   },
 
   // Flow-rate estimate from the heater energy balance: ṁ = P/(c·ΔT), using the

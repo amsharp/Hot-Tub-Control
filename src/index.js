@@ -13,6 +13,7 @@ import { ThermalModel } from './thermal/model.js';
 import { SmartHeatPlanner } from './thermal/planner.js';
 import { EnergyMeter } from './energy.js';
 import { WeatherProvider } from './weather.js';
+import { TouSchedule } from './rates.js';
 import { RawLog } from './rawlog.js';
 import { FlowModel } from './flow.js';
 import { FilterHealth } from './filterhealth.js';
@@ -62,11 +63,16 @@ async function main() {
     minDeltaC: config.flow.minDeltaC,
   });
 
-  // Software energy estimator.
+  // Software energy estimator, priced by the TOU-D-PRIME schedule when enabled
+  // (falls back to the flat rate/ratePeak pair otherwise).
+  const tou = config.energy.tou;
+  const touSchedule =
+    tou.enabled && tou.summerOn > 0 ? new TouSchedule(tou) : null;
   const meter = new EnergyMeter({
     watts: { heater: config.energy.heaterW, pump: config.energy.pumpW, blower: config.energy.blowerW },
     rate: config.energy.rate,
     ratePeak: config.energy.ratePeak || config.energy.rate,
+    rateFor: touSchedule ? (nowMs) => touSchedule.rateAt(new Date(nowMs)) : undefined,
   });
 
   // Forecast-grounded ambient temperature (Open-Meteo). Feeds the cooling model

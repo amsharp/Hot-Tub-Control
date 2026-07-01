@@ -16,12 +16,17 @@ export class EnergyMeter {
    * @param {{heater:number,pump:number,blower:number}} [opts.watts]
    * @param {number} [opts.rate] $/kWh general/off-peak
    * @param {number} [opts.ratePeak] $/kWh during peak (defaults to rate)
+   * @param {(nowMs:number)=>number} [opts.rateFor] time-of-use price function
+   *   ($/kWh at a timestamp). When provided it takes precedence over the flat
+   *   rate/ratePeak pair for pricing; the peak/off-peak *buckets* still come
+   *   from the ctx.inPeak flag.
    */
-  constructor({ store, watts = { heater: 1300, pump: 40, blower: 600 }, rate = 0.4, ratePeak } = {}) {
+  constructor({ store, watts = { heater: 1300, pump: 40, blower: 600 }, rate = 0.4, ratePeak, rateFor } = {}) {
     this.store = store || new JsonStore('energy.json', {});
     this.watts = watts;
     this.rate = rate;
     this.ratePeak = ratePeak == null ? rate : ratePeak;
+    this.rateFor = typeof rateFor === 'function' ? rateFor : null;
     const d = this.store.data;
     for (const k of [
       'todayKwh', 'todayCost', 'monthKwh', 'monthCost', 'overrideKwh', 'overrideCost',
@@ -80,7 +85,11 @@ export class EnergyMeter {
           d.peakCost = 0;
         }
         const kwh = (d.lastW / 1000) * dtH;
-        const cost = kwh * (d.lastInPeak ? this.ratePeak : this.rate);
+        // Price the interval at the tariff that prevailed when it started
+        // (left-Riemann, like the wattage): the persisted lastRate if a TOU
+        // function stamped one, else the flat peak/off-peak pair.
+        const rate = d.lastRate != null ? d.lastRate : d.lastInPeak ? this.ratePeak : this.rate;
+        const cost = kwh * rate;
         d.todayKwh += kwh;
         d.todayCost += cost;
         d.monthKwh += kwh;
@@ -104,6 +113,7 @@ export class EnergyMeter {
     d.lastW = w;
     d.lastInPeak = !!ctx.inPeak;
     d.lastOverridden = !!ctx.overridden;
+    d.lastRate = this.rateFor ? this.rateFor(now) : null;
     this.store.save();
     return w;
   }
@@ -124,6 +134,7 @@ export class EnergyMeter {
       totalCost: round(d.totalCost),
       rate: this.rate,
       ratePeak: this.ratePeak,
+      rateNow: this.rateFor ? this.rateFor(Date.now()) : d.lastInPeak ? this.ratePeak : this.rate,
       loads: this.watts,
     };
   }
