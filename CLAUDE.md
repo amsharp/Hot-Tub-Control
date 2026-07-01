@@ -88,6 +88,15 @@ cloud has no official public API and may change. Constants live in
 `temp_set_unit` (0/C, 1/F), `power`, `heat_power`, `filter_power`, `wave_power`
 (bubbles), `locked`. On/off values are 1/0. Temp clamps: C 20–40, F 68–104.
 
+**Decoded undocumented registers (original reverse-engineering, verified live):**
+`word2`/`word5` ÷10 → °C = heater **inlet** (bulk tub temp — `getStatus()` uses it
+for `currentTemp`, falling back to `Tnow`, whose element-side sensor overshoots
+~2 °F after heater cutoff); `word7` (°C) = heater **outlet/element**. Outlet−inlet
+ΔT ≈ 3 °C while the element fires, collapsing to ~0.2 °C at element-off — the
+basis of the flow estimate (`src/flow.js`, ṁ = P/(c·ΔT), P ≈ 1320 W nameplate).
+`heat` enum: 0=off, 2=on/idle, **3=element firing** (the only state drawing
+heater watts), **4=target reached, element off** (E32=1 accompanies it).
+
 **Fault codes** (`detectFaults`): keys matching `E\d{2}`, `system_err\d+`, or
 `earth` that are truthy. **`E32` is NOT a fault** (means "target reached").
 **`E02` = low water flow**, the only `AUTO_CLEARABLE_CODES` member by default.

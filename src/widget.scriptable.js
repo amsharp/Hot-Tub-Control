@@ -71,13 +71,10 @@ if (!s) {
 
   const right = top.addStack();
   right.layoutVertically();
-  // Prefer the inlet-register temperature (flow.inC, °C): it reads the water
-  // being drawn FROM the tub, so it reflects bulk temp and doesn't overshoot
-  // like Tnow's element-side sensor does right after the heater cuts off.
-  // Fall back to the pump's headline reading if the register is unavailable.
-  const dispF =
-    s.flow && s.flow.inC != null ? Math.round((s.flow.inC * 9) / 5 + 32) : Math.round(s.currentTemp);
-  const big = right.addText(`${dispF}°F`);
+  // currentTemp is bulk-accurate at the source now: the client derives it from
+  // the inlet register (water drawn from the tub) and only falls back to the
+  // overshoot-prone element-side Tnow if the register is unavailable.
+  const big = right.addText(`${Math.round(s.currentTemp)}°F`);
   big.font = Font.boldSystemFont(28);
   big.textColor = PRIMARY;
   big.rightAlignText();
