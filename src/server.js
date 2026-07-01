@@ -68,7 +68,7 @@ const HUD_MANIFEST = {
   ],
 };
 
-export function createServer({ client, scheduler, watchdog, history, rawlog, flowModel, getPlan, getEnergy }) {
+export function createServer({ client, scheduler, watchdog, history, rawlog, flowModel, filterHealth, getPlan, getEnergy }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -175,7 +175,8 @@ export function createServer({ client, scheduler, watchdog, history, rawlog, flo
     try {
       const status = await client.getStatus();
       const flow = flowModel ? flowModel.compute(status) : null;
-      res.json({ ...status, flow, summary: formatStatus(status) });
+      const filter = filterHealth ? filterHealth.health() : null;
+      res.json({ ...status, flow, filterHealth: filter, summary: formatStatus(status) });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

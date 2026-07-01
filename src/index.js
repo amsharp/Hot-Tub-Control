@@ -15,6 +15,7 @@ import { EnergyMeter } from './energy.js';
 import { WeatherProvider } from './weather.js';
 import { RawLog } from './rawlog.js';
 import { FlowModel } from './flow.js';
+import { FilterHealth } from './filterhealth.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -48,6 +49,10 @@ async function main() {
   // Diagnostic raw-register capture (for decoding the pump's extra temperature
   // registers into a flow/filter-health proxy). Diagnostic only.
   const rawlog = new RawLog();
+
+  // Filter health: 24h moving average of the flow estimate vs its best-ever
+  // baseline. Ratio-based, so absolute flow-scale errors cancel.
+  const filterHealth = new FilterHealth();
 
   // Flow-rate estimate from the heater energy balance (inlet/outlet ΔT + power).
   const flowModel = new FlowModel({
@@ -187,9 +192,11 @@ async function main() {
       log.warn('Raw log failed:', err.message);
     }
 
-    // Update the flow estimate's last-good reading from the 2-min stream.
+    // Update the flow estimate's last-good reading from the 2-min stream, and
+    // feed reliable samples into the filter-health moving average.
     try {
-      flowModel.compute(status, now);
+      const f = flowModel.compute(status, now);
+      filterHealth.record(f, now);
     } catch (err) {
       log.warn('Flow compute failed:', err.message);
     }
@@ -255,7 +262,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history, rawlog, flowModel, getPlan, getEnergy });
+  const app = createServer({ client, scheduler, watchdog, history, rawlog, flowModel, filterHealth, getPlan, getEnergy });
 
   // Keep the outdoor forecast fresh (used as the cooling model's ambient). Runs
   // independently of the pump; a no-op when no location is configured.

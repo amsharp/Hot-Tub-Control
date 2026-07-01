@@ -63,9 +63,13 @@ if (!s) {
       : maintaining
         ? "MAINTAIN"
         : "IDLE";
-  const st = left.addText(stateTxt + "   ·   PUMP " + (pumpOn ? "ON" : "OFF"));
+  // Filter health (24h flow average vs clean baseline) once it has enough data.
+  let statusLine = stateTxt + "   ·   PUMP " + (pumpOn ? "ON" : "OFF");
+  const fh = s.filterHealth;
+  if (fh && fh.pct != null) statusLine += "   ·   FILTER " + fh.pct + "%";
+  const st = left.addText(statusLine);
   st.font = Font.semiboldSystemFont(10);
-  st.textColor = faulted ? RED : firing ? AMBER : maintaining ? GREEN : SECOND;
+  st.textColor = faulted ? RED : fh && fh.pct != null && fh.pct < 70 ? RED : firing ? AMBER : maintaining ? GREEN : SECOND;
 
   top.addSpacer();
 
