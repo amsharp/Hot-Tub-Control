@@ -134,32 +134,43 @@ async function main() {
   // model, and run the smart pre-heat controller.
   async function onStatus(status) {
     await enforceUnit(status);
+    const now = Date.now();
     const tempF =
       status.currentTemp == null
         ? null
         : status.unit === 'C'
           ? Math.round((status.currentTemp * 9) / 5 + 32)
           : status.currentTemp;
-    try {
-      history.record(status);
-    } catch (err) {
-      log.warn('History record failed:', err.message);
-    }
+
+    // The temp sensor only reads true bulk temp while the pump circulates AND has
+    // settled (a few minutes). Determine reliability ONCE, from the model, and let
+    // it gate every downstream use so a stagnant/unsettled reading is never taken
+    // as a real temperature.
+    const circulating = !!status.filter;
+    let est = { tempF, reliable: false };
     if (tempF != null) {
-      const now = Date.now();
-      const circulating = !!status.filter; // sensor only reads true temp while circulating
       try {
-        model.observe(tempF, status.heat, circulating, now);
+        model.observe(tempF, status.heat, circulating, now); // learns only when settled
       } catch (err) {
         log.warn('Thermal observe failed:', err.message);
       }
-      if (config.smartHeat.enabled) {
-        const est = model.estimateTemp(tempF, circulating, now);
-        try {
-          await runSmartHeat(status, est.tempF, est.reliable);
-        } catch (err) {
-          log.warn('SmartHeat failed:', err.message);
-        }
+      est = model.estimateTemp(tempF, circulating, now); // reliable only when settled
+    }
+
+    // Only store/chart a temperature the pump has actually settled at. Unsettled
+    // readings are skipped entirely (the chart shows a gap) rather than logging a
+    // stale value that looks like a real dip.
+    try {
+      if (est.reliable) history.record(status, now);
+    } catch (err) {
+      log.warn('History record failed:', err.message);
+    }
+
+    if (tempF != null && config.smartHeat.enabled) {
+      try {
+        await runSmartHeat(status, est.tempF, est.reliable);
+      } catch (err) {
+        log.warn('SmartHeat failed:', err.message);
       }
     }
 
