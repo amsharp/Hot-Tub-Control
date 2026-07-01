@@ -88,12 +88,16 @@ cloud has no official public API and may change. Constants live in
 `temp_set_unit` (0/C, 1/F), `power`, `heat_power`, `filter_power`, `wave_power`
 (bubbles), `locked`. On/off values are 1/0. Temp clamps: C 20–40, F 68–104.
 
-**Decoded undocumented registers (original reverse-engineering, verified live):**
-`word2`/`word5` ÷10 → °C = heater **inlet** (bulk tub temp — `getStatus()` uses it
-for `currentTemp`, falling back to `Tnow`, whose element-side sensor overshoots
-~2 °F after heater cutoff); `word7` (°C) = heater **outlet/element**. Outlet−inlet
-ΔT ≈ 3 °C while the element fires, collapsing to ~0.2 °C at element-off — the
-basis of the flow estimate (`src/flow.js`, ṁ = P/(c·ΔT), P ≈ 1320 W nameplate).
+**Undocumented registers (original reverse-engineering, partially decoded):**
+`word2`/`word5` ÷10 → °C and `word7` (°C) look like an inlet/outlet pair WHILE
+the element fires (word2 ≈ 3 °C below water, word7 above; ΔT collapses to ~0.2 °C
+at element-off) — the basis of the flow estimate (`src/flow.js`, ṁ = P/(c·ΔT),
+P ≈ 1320 W nameplate, computed only at heat=3). **BUT the "word2 = bulk inlet"
+reading was falsified live**: after element-off it kept climbing to 44.6 °C
+(≈112 °F, tub at ~104 °F) with a negative "ΔT" — outside the firing state it
+behaves like an internal/enclosure temp. `currentTemp` MUST come from `Tnow`
+(which merely overshoots ~2 °F briefly after heater cutoff). The rawlog
+(`/api/raw`) keeps capturing all states to finish the decode.
 `heat` enum: 0=off, 2=on/idle, **3=element firing** (the only state drawing
 heater watts), **4=target reached, element off** (E32=1 accompanies it).
 

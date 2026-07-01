@@ -35,12 +35,14 @@ export function apiRootForRegion(region) {
 export const AIRJET_PROFILE = {
   productName: 'Airjet_V01',
   tempUnitValues: { F: 0, C: 1 }, // raw Tunit value for each unit (this firmware)
-  // Undocumented register decoded from live data: word2 (÷10 → °C) reads the
-  // heater INLET — water drawn from the tub — so it tracks bulk temperature and,
-  // unlike Tnow's element-side sensor, doesn't overshoot after heater cutoff
-  // (observed: Tnow=106 vs inlet=40.8 °C≈105 °F at a 104 °F target; the
-  // outlet−inlet ΔT collapsing 3→0.2 °C at element-off confirmed the decode).
-  bulkTempRegister: { key: 'word2', scale: 0.1 }, // → °C
+  // Undocumented registers (live observations, still being decoded via the
+  // rawlog): word2/word5 (÷10 → °C) read ~3 °C BELOW the water while the element
+  // fires and word7 (°C) reads above it, which fits an inlet/outlet pair — the
+  // basis of the ΔT flow estimate. BUT word2 kept climbing to 44.6 °C (≈112 °F)
+  // after element-off at a 104 °F target, with the "ΔT" going negative — so
+  // word2 is NOT a trustworthy bulk-water temperature outside the firing state
+  // (it behaves more like an internal/enclosure temp that lags runtime). Do NOT
+  // use it as currentTemp; Tnow remains the authoritative water reading.
   attrs: {
     currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
     targetTemp: 'Tset', // target temperature (integer, °F on V01)

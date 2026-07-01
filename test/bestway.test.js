@@ -78,39 +78,16 @@ test('getStatus reads Celsius mode (Tunit=1)', async () => {
   assert.equal(status.targetTemp, 40);
 });
 
-test('getStatus prefers the inlet register (bulk temp) over Tnow', async () => {
-  // Live-observed overshoot case: element-side Tnow reads 106 °F after cutoff
-  // while the inlet register (word2 ÷10 → °C) reads the true bulk 40.8 °C.
-  const attr = { Tnow: 106, Tset: 104, Tunit: 0, power: 1, heat: 4, filter: 2, wave: 0, word2: 408 };
+test('getStatus uses Tnow even when word2 is present (falsified "inlet" decode)', async () => {
+  // Live falsification: word2 climbed to 44.6 °C (≈112 °F) AFTER element-off at
+  // a 104 °F target — it is not a bulk-water reading and must never be used as
+  // currentTemp. Tnow stays authoritative.
+  const attr = { Tnow: 106, Tset: 104, Tunit: 0, power: 1, heat: 4, filter: 2, wave: 0, word2: 446, word7: 41 };
   const client = new BestwayClient({ username: 'a', password: 'b', fetchImpl: fakeFetch(baseRoutes(attr)) });
   const status = await client.getStatus();
-  assert.equal(status.tempSource, 'inlet');
-  assert.equal(status.currentTemp, 105.4); // 40.8 °C in the active unit (F)
-  assert.equal(status.panelTemp, 106); // headline reading still exposed
-});
-
-test('getStatus reports the inlet register in °C when the pump is in Celsius mode', async () => {
-  const attr = { Tnow: 41, Tset: 40, Tunit: 1, power: 1, heat: 4, filter: 2, wave: 0, word2: 408 };
-  const client = new BestwayClient({ username: 'a', password: 'b', fetchImpl: fakeFetch(baseRoutes(attr)) });
-  const status = await client.getStatus();
-  assert.equal(status.tempSource, 'inlet');
-  assert.equal(status.currentTemp, 40.8);
-});
-
-test('getStatus falls back to Tnow when the inlet register is absent or implausible', async () => {
-  const missing = await new BestwayClient({
-    username: 'a', password: 'b',
-    fetchImpl: fakeFetch(baseRoutes({ Tnow: 100, Tset: 104, Tunit: 0, power: 1, heat: 3, filter: 2, wave: 0 })),
-  }).getStatus();
-  assert.equal(missing.tempSource, 'panel');
-  assert.equal(missing.currentTemp, 100);
-
-  const glitched = await new BestwayClient({
-    username: 'a', password: 'b',
-    fetchImpl: fakeFetch(baseRoutes({ Tnow: 100, Tset: 104, Tunit: 0, power: 1, heat: 3, filter: 2, wave: 0, word2: 0 })),
-  }).getStatus();
-  assert.equal(glitched.tempSource, 'panel'); // 0 -> implausible 0 °C, guarded out
-  assert.equal(glitched.currentTemp, 100);
+  assert.equal(status.tempSource, 'panel');
+  assert.equal(status.currentTemp, 106);
+  assert.equal(status.panelTemp, 106);
 });
 
 test('setDisplayUnit writes the mapped Tunit value', async () => {

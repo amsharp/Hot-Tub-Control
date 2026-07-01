@@ -188,24 +188,17 @@ export class BestwayClient {
     // non-zero state as "on"; this is also correct for the strict 0/1 fields.
     const isOn = (v) => v === true || Number(v) > 0;
 
-    // Water temperature: prefer the decoded inlet register (bulk tub temp) over
-    // the headline Tnow, whose element-side sensor overshoots after heater
-    // cutoff. Guarded to a plausible range so a glitched/absent register falls
-    // back to Tnow. Reported in the active display unit, like Tnow.
+    // Water temperature: the headline Tnow. We briefly used the word2 register
+    // ("inlet") instead, but live data falsified that decode: word2 kept
+    // climbing to 44.6 °C (≈112 °F) AFTER the element shut off at a 104 °F
+    // target, and the word7−word2 "ΔT" went negative — impossible for water
+    // drawn from the tub, so word2 is NOT a reliable bulk-water reading (it
+    // behaves more like an internal/enclosure temperature that lags runtime).
+    // Tnow overshoots ~2 °F right after heater cutoff, but it is bounded and
+    // recovers; word2's failure mode misleads the controller much worse.
     const panelTemp = numOrNull(attr[a.currentTemp]);
-    let currentTemp = panelTemp;
-    let tempSource = 'panel';
-    const reg = this.profile.bulkTempRegister;
-    if (reg) {
-      const rawReg = numOrNull(attr[reg.key]);
-      // Round once at the source (0.1 °C register resolution) to avoid float
-      // artifacts like 408 * 0.1 = 40.800000000000004.
-      const inC = rawReg == null ? null : Math.round(rawReg * reg.scale * 10) / 10;
-      if (inC != null && inC > 2 && inC < 48) {
-        currentTemp = unit === 'F' ? Math.round(((inC * 9) / 5 + 32) * 10) / 10 : inC;
-        tempSource = 'inlet';
-      }
-    }
+    const currentTemp = panelTemp;
+    const tempSource = 'panel';
 
     return {
       deviceId: dev.did,
