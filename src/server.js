@@ -3,6 +3,9 @@
 //   - Google Smart Home fulfillment webhook (/fulfillment, Bearer-protected)
 //   - A small admin REST API for schedules   (/api/*, X-Admin-Token-protected)
 //   - Health + status                        (/healthz, /api/status)
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import express from 'express';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -24,12 +27,19 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// The web control panel (a SaluSpa-style HUD). The HTML shell is public; every
+// control/read call it makes is gated by the admin token entered in the page.
+const HUD_HTML = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'hud.html'), 'utf8');
+
 export function createServer({ client, scheduler, watchdog }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+  // Web HUD (control panel).
+  app.get(['/', '/hud'], (_req, res) => res.type('html').send(HUD_HTML));
 
   // Force a watchdog cycle now (check faults, auto-clear if applicable).
   app.post('/api/recover', requireAdmin, async (_req, res) => {
@@ -111,11 +121,18 @@ export function createServer({ client, scheduler, watchdog }) {
   // --- Admin API: direct control --------------------------------------------
   app.post('/api/control', requireAdmin, async (req, res) => {
     try {
-      const { action, celsius } = req.body;
-      if (action === 'on') await client.setHeating(true);
+      const { action, celsius, fahrenheit, on } = req.body;
+      // Granular, independent controls (used by the web HUD) + the original
+      // convenience actions (on/off = whole-unit heating) for back-compat.
+      if (action === 'power') await client.setPower(!!on);
+      else if (action === 'heat') await client.setHeat(!!on);
+      else if (action === 'filter') await client.setFilter(!!on);
+      else if (action === 'on') await client.setHeating(true);
       else if (action === 'off') await client.setHeating(false);
-      else if (action === 'temp') await client.setTargetTemperature(Number(celsius), 'C');
-      else if (action === 'bubbles_on') await client.setBubbles(true);
+      else if (action === 'temp') {
+        if (fahrenheit != null) await client.setTargetTemperature(Number(fahrenheit), 'F');
+        else await client.setTargetTemperature(Number(celsius), 'C');
+      } else if (action === 'bubbles_on') await client.setBubbles(true);
       else if (action === 'bubbles_off') await client.setBubbles(false);
       else {
         res.status(400).json({ error: `unknown action ${action}` });

@@ -23,19 +23,39 @@ function syncPayload(deviceId, name) {
       {
         id: deviceId,
         type: 'action.devices.types.THERMOSTAT',
-        traits: ['action.devices.traits.OnOff', 'action.devices.traits.TemperatureSetting'],
-        name: { name: name || 'Hot tub', defaultNames: ['Bestway Spa'], nicknames: ['hot tub', 'spa'] },
+        // OnOff = unit power, TemperatureSetting = target/ambient + heat/off mode,
+        // Toggles = an independent "Filter" switch (the pump's circulation pump).
+        traits: [
+          'action.devices.traits.OnOff',
+          'action.devices.traits.TemperatureSetting',
+          'action.devices.traits.Toggles',
+        ],
+        name: {
+          name: name || 'Hot tub',
+          defaultNames: ['Bestway Spa'],
+          nicknames: ['hot tub', 'spa', 'jacuzzi', 'the tub'],
+        },
         willReportState: false,
         attributes: {
           availableThermostatModes: ['off', 'heat'],
-          thermostatTemperatureUnit: 'C',
+          // Display unit shown in the Google Home app. The trait still transmits
+          // all values in Celsius per spec; Google converts for display.
+          thermostatTemperatureUnit: 'F',
           thermostatTemperatureRange: {
             minThresholdCelsius: RANGE_C.min,
             maxThresholdCelsius: RANGE_C.max,
           },
           commandOnlyOnOff: false,
+          availableToggles: [
+            {
+              name: 'filter',
+              name_values: [
+                { name_synonym: ['filter', 'filtration', 'filter pump', 'circulation'], lang: 'en' },
+              ],
+            },
+          ],
         },
-        deviceInfo: { manufacturer: 'Bestway', model: 'Airjet' },
+        deviceInfo: { manufacturer: 'Bestway', model: 'Airjet V01' },
       },
     ],
   };
@@ -51,6 +71,7 @@ export function statusToState(status) {
     thermostatMode: status.heat ? 'heat' : 'off',
     thermostatTemperatureSetpoint: toC(status.targetTemp),
     thermostatTemperatureAmbient: toC(status.currentTemp),
+    currentToggleSettings: { filter: !!status.filter },
   };
 }
 
@@ -59,14 +80,21 @@ async function handleExecuteCommand(client, command, status) {
   const params = command.params || {};
 
   if (name === 'action.devices.commands.OnOff') {
-    await client.setHeating(!!params.on);
+    // OnOff controls unit power independently (heat/filter are their own controls).
+    await client.setPower(!!params.on);
     return { on: !!params.on };
   }
 
   if (name === 'action.devices.commands.ThermostatSetMode') {
     const heat = params.thermostatMode === 'heat';
-    await client.setHeating(heat);
+    await client.setHeat(heat);
     return { thermostatMode: params.thermostatMode };
+  }
+
+  if (name === 'action.devices.commands.SetToggles') {
+    const t = params.updateToggleSettings || {};
+    if ('filter' in t) await client.setFilter(!!t.filter);
+    return { currentToggleSettings: t };
   }
 
   if (name === 'action.devices.commands.ThermostatTemperatureSetpoint') {

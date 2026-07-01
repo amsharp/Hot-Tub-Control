@@ -7,6 +7,9 @@ function fakeClient(status, calls = []) {
     calls,
     getStatus: async () => status,
     setHeating: async (on) => calls.push(['setHeating', on]),
+    setPower: async (on) => calls.push(['setPower', on]),
+    setHeat: async (on) => calls.push(['setHeat', on]),
+    setFilter: async (on) => calls.push(['setFilter', on]),
     setTargetTemperature: async (v, u) => {
       calls.push(['setTargetTemperature', v, u]);
       return v;
@@ -40,7 +43,9 @@ test('SYNC returns a thermostat device with both traits', async () => {
   assert.equal(dev.type, 'action.devices.types.THERMOSTAT');
   assert.ok(dev.traits.includes('action.devices.traits.OnOff'));
   assert.ok(dev.traits.includes('action.devices.traits.TemperatureSetting'));
+  assert.ok(dev.traits.includes('action.devices.traits.Toggles'));
   assert.deepEqual(dev.attributes.availableThermostatModes, ['off', 'heat']);
+  assert.equal(dev.attributes.availableToggles[0].name, 'filter');
 });
 
 test('QUERY maps status to Google state', async () => {
@@ -57,9 +62,10 @@ test('QUERY maps status to Google state', async () => {
   assert.equal(state.thermostatMode, 'heat');
   assert.equal(state.thermostatTemperatureSetpoint, 38);
   assert.equal(state.thermostatTemperatureAmbient, 36);
+  assert.deepEqual(state.currentToggleSettings, { filter: true });
 });
 
-test('EXECUTE OnOff calls setHeating', async () => {
+test('EXECUTE OnOff calls setPower', async () => {
   const client = fakeClient(STATUS_C);
   const res = await handleSmartHomeRequest(
     {
@@ -81,7 +87,37 @@ test('EXECUTE OnOff calls setHeating', async () => {
     { client },
   );
   assert.equal(res.payload.commands[0].status, 'SUCCESS');
-  assert.deepEqual(client.calls[0], ['setHeating', false]);
+  assert.deepEqual(client.calls[0], ['setPower', false]);
+});
+
+test('EXECUTE SetToggles(filter) calls setFilter', async () => {
+  const client = fakeClient(STATUS_C);
+  const res = await handleSmartHomeRequest(
+    {
+      requestId: 'r5',
+      inputs: [
+        {
+          intent: 'action.devices.EXECUTE',
+          payload: {
+            commands: [
+              {
+                devices: [{ id: 'spa-123' }],
+                execution: [
+                  {
+                    command: 'action.devices.commands.SetToggles',
+                    params: { updateToggleSettings: { filter: false } },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { client },
+  );
+  assert.equal(res.payload.commands[0].status, 'SUCCESS');
+  assert.deepEqual(client.calls[0], ['setFilter', false]);
 });
 
 test('EXECUTE setpoint converts Celsius to pump Fahrenheit', async () => {

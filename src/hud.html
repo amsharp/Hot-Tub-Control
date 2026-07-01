@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#a89e90" />
+<title>Hot Tub</title>
+<style>
+  :root {
+    --bg: #b5aa9c;
+    --card: #e7e2d9;
+    --ink: #6d675e;
+    --ink-soft: #8a8378;
+    --teal: #1f9d9d;
+    --teal-off: #a49a8d;
+    --rail-cold: #4d76b0;
+    --rail-hot: #a23a30;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex; justify-content: center;
+  }
+  .app { width: 100%; max-width: 480px; min-height: 100%; background: var(--card); position: relative; }
+  .topbar {
+    background: var(--bg); color: #f4f0e9;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px 14px; gap: 12px;
+  }
+  .brand { letter-spacing: .18em; font-size: 15px; font-weight: 600; opacity: .95; }
+  .power {
+    width: 46px; height: 46px; border-radius: 50%; border: none;
+    background: var(--teal); color: #fff; font-size: 20px; cursor: pointer;
+    display: grid; place-items: center; transition: background .2s, opacity .2s;
+  }
+  .power.off { background: var(--teal-off); }
+  .dot { width: 22px; }
+  .body { padding: 22px 22px 40px; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 2px; border-top: 1px solid rgba(109,103,94,.14);
+  }
+  .row:first-of-type { border-top: none; }
+  .row .label { display: flex; align-items: center; gap: 12px; font-size: 21px; font-weight: 600; }
+  .row .icon { font-size: 20px; width: 26px; text-align: center; opacity: .8; }
+  .toggle {
+    display: inline-flex; background: var(--teal-off); border-radius: 999px;
+    padding: 4px; cursor: pointer; user-select: none; min-width: 132px;
+  }
+  .toggle span {
+    flex: 1; text-align: center; padding: 8px 14px; border-radius: 999px;
+    font-size: 15px; font-weight: 600; color: #f2eee7; transition: background .2s, color .2s;
+  }
+  .toggle .on-l { color: #efeadf; }
+  .toggle[data-on="true"] .on-l { background: var(--teal); color: #fff; }
+  .toggle[data-on="false"] .off-l { background: #efeadf; color: #6d675e; }
+  .bigtemp { text-align: center; font-size: 92px; font-weight: 300; line-height: 1.05; margin: 18px 0 6px; letter-spacing: -2px; }
+  .bigtemp .u { font-size: 54px; vertical-align: super; }
+  .sliderwrap { padding: 10px 4px 8px; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 8px; border-radius: 999px;
+    background: linear-gradient(to right, var(--rail-cold), #e6ded3 52%, var(--rail-hot));
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 30px; height: 30px; border-radius: 50%;
+    background: #ada393; box-shadow: 0 2px 6px rgba(0,0,0,.35); cursor: pointer; border: 2px solid #cfc7b9;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 30px; height: 30px; border-radius: 50%; background: #ada393;
+    box-shadow: 0 2px 6px rgba(0,0,0,.35); cursor: pointer; border: 2px solid #cfc7b9;
+  }
+  .current { font-size: 21px; font-weight: 600; }
+  .current .pill { display: inline-block; background: rgba(162,58,48,.14); color: var(--rail-hot); border-radius: 999px; padding: 2px 12px; font-size: 15px; margin-left: 6px; }
+  .msg { text-align: center; min-height: 20px; font-size: 13px; color: var(--ink-soft); padding-top: 8px; }
+  .msg.err { color: var(--rail-hot); }
+  .offline { text-align:center; font-size:13px; color: var(--rail-hot); font-weight:600; }
+  /* token gate */
+  .gate {
+    position: fixed; inset: 0; background: rgba(60,55,48,.6); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; padding: 24px; z-index: 10;
+  }
+  .gate.show { display: flex; }
+  .gate .box { background: var(--card); border-radius: 16px; padding: 22px; width: 100%; max-width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
+  .gate h2 { margin: 0 0 6px; font-size: 18px; }
+  .gate p { margin: 0 0 14px; font-size: 13px; color: var(--ink-soft); }
+  .gate input { width: 100%; padding: 12px; border: 1px solid #cfc7b9; border-radius: 10px; font-size: 15px; background: #f6f2ec; }
+  .gate button { width: 100%; margin-top: 12px; padding: 12px; border: none; border-radius: 10px; background: var(--teal); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .disabled { opacity: .45; pointer-events: none; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <button class="power off" id="power" title="Power">&#9211;</button>
+      <div class="brand" id="brand">HOT TUB</div>
+      <div class="dot"></div>
+    </div>
+    <div class="body" id="panel">
+      <div class="offline" id="offline" style="display:none">Pump offline</div>
+
+      <div class="row">
+        <div class="label"><span class="icon">&#128293;</span> Heat</div>
+        <div class="toggle" id="heat" data-on="false">
+          <span class="off-l">Off</span><span class="on-l">On</span>
+        </div>
+      </div>
+
+      <div class="bigtemp" id="bigtemp">--<span class="u">&deg;F</span></div>
+      <div class="sliderwrap">
+        <input type="range" id="slider" min="68" max="104" step="1" value="98" />
+      </div>
+
+      <div class="row">
+        <div class="label current">Current <span class="pill" id="current">-- &deg;F</span></div>
+        <div></div>
+      </div>
+
+      <div class="row">
+        <div class="label"><span class="icon">&#127754;</span> Filter</div>
+        <div class="toggle" id="filter" data-on="false">
+          <span class="off-l">Off</span><span class="on-l">On</span>
+        </div>
+      </div>
+
+      <div class="msg" id="msg"></div>
+    </div>
+  </div>
+
+  <div class="gate" id="gate">
+    <div class="box">
+      <h2>Enter access token</h2>
+      <p>One-time. Stored on this device only.</p>
+      <input id="token" type="password" placeholder="Admin token" autocomplete="off" />
+      <button id="tokenSave">Unlock</button>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var KEY = "htc_admin_token";
+  var token = localStorage.getItem(KEY) || "";
+  var busy = false, dragging = false, pollTimer = null;
+
+  function $(id) { return document.getElementById(id); }
+  function gate(show) { $("gate").classList.toggle("show", show); }
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ "Content-Type": "application/json", "X-Admin-Token": token }, opts.headers || {});
+    return fetch(path, opts).then(function (r) {
+      if (r.status === 401) { localStorage.removeItem(KEY); token = ""; gate(true); throw new Error("unauthorized"); }
+      return r.json();
+    });
+  }
+
+  function msg(text, isErr) {
+    var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (isErr ? " err" : "");
+    if (text && !isErr) setTimeout(function () { if ($("msg").textContent === text) $("msg").textContent = ""; }, 2500);
+  }
+
+  function render(s) {
+    if (!s || s.error) { msg(s && s.error ? s.error : "Read failed", true); return; }
+    $("brand").textContent = (s.name || "HOT TUB").toUpperCase();
+    $("offline").style.display = s.online ? "none" : "block";
+    var pw = $("power"); pw.classList.toggle("off", !s.power);
+    $("heat").setAttribute("data-on", String(!!s.heat));
+    $("filter").setAttribute("data-on", String(!!s.filter));
+    if (s.currentTemp != null) $("current").innerHTML = Math.round(s.currentTemp) + " &deg;F";
+    if (s.targetTemp != null && !dragging) {
+      $("slider").value = clampF(s.targetTemp);
+      setBig(s.targetTemp);
+    }
+  }
+  function setBig(v) { $("bigtemp").innerHTML = Math.round(v) + '<span class="u">&deg;F</span>'; }
+  function clampF(v) { return Math.max(68, Math.min(104, Math.round(v))); }
+
+  function refresh() {
+    return api("/api/status").then(render).catch(function (e) { if (e.message !== "unauthorized") msg("Offline", true); });
+  }
+
+  function control(payload, note) {
+    if (busy) return; busy = true; msg(note || "Working...");
+    api("/api/control", { method: "POST", body: JSON.stringify(payload) })
+      .then(function (r) { if (r && r.status) render(r.status); msg(""); })
+      .catch(function (e) { if (e.message !== "unauthorized") msg("Command failed", true); })
+      .finally(function () { busy = false; });
+  }
+
+  // Power toggles the whole unit.
+  $("power").onclick = function () {
+    var turningOn = $("power").classList.contains("off");
+    control({ action: "power", on: turningOn }, turningOn ? "Powering on..." : "Powering off...");
+  };
+  $("heat").onclick = function () {
+    var on = this.getAttribute("data-on") !== "true";
+    control({ action: "heat", on: on }, on ? "Heat on..." : "Heat off...");
+  };
+  $("filter").onclick = function () {
+    var on = this.getAttribute("data-on") !== "true";
+    control({ action: "filter", on: on }, on ? "Filter on..." : "Filter off...");
+  };
+
+  var slider = $("slider");
+  slider.addEventListener("input", function () { dragging = true; setBig(this.value); });
+  function commitTemp() {
+    dragging = false;
+    control({ action: "temp", fahrenheit: Number(slider.value) }, "Set " + slider.value + " °F");
+  }
+  slider.addEventListener("change", commitTemp);
+
+  $("tokenSave").onclick = function () {
+    var v = $("token").value.trim(); if (!v) return;
+    token = v; localStorage.setItem(KEY, v); gate(false);
+    refresh();
+  };
+  $("token").addEventListener("keydown", function (e) { if (e.key === "Enter") $("tokenSave").click(); });
+
+  function startPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(function () { if (!busy && !dragging) refresh(); }, 10000); }
+
+  if (!token) { gate(true); } else { refresh(); }
+  startPolling();
+})();
+</script>
+</body>
+</html>
