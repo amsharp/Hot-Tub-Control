@@ -70,7 +70,9 @@ if (!s) {
   // Size the chart to the widget: medium and large are the same width, large is
   // taller — so grow the chart height and let a flexible spacer bottom-align.
   const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
-  const chartH = fam === "large" ? 150 : 60;
+  // Chart height tuned via the tools/widget-preview harness so the medium widget
+  // fills vertically without the footer overflowing the rounded bottom.
+  const chartH = fam === "large" ? 165 : 78;
 
   w.addSpacer(8);
   const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 600, chartH * 2) : null;

@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<!--
+  Faithful HTML mock of the Scriptable widget (src/widget.scriptable.js) at true
+  medium-widget size, used to preview corner clearance / spacing without an iOS
+  device. overflow:hidden + border-radius reproduces the iOS corner mask, so any
+  clipping shows up. Params (query string, with defaults) let you sweep insets:
+    pt/ps/pb  padding top/side/bottom   ch  chart height   cw  chart image width
+    r         corner radius (use ~30 for worst-case)   w/h  widget size
+  Render with tools/widget-preview/render.sh and eyeball the PNG.
+-->
+<style>
+  html, body { margin: 0; background: #b58a5a; }
+  .card {
+    margin: 24px; position: relative; background: #202124; overflow: hidden;
+    box-sizing: border-box; display: flex; flex-direction: column;
+    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; color: #e8eaed;
+  }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; }
+  .left { display: flex; flex-direction: column; }
+  .right { display: flex; flex-direction: column; align-items: flex-end; }
+  .name { font-weight: 700; }
+  .status { font-weight: 600; color: #fdd663; }
+  .big { font-weight: 700; line-height: 1; }
+  .set { font-weight: 600; color: #9aa0a6; }
+  .foot { color: #9aa0a6; margin-top: auto; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div class="card" id="card"></div>
+<script>
+try {
+  function num(k, d) { var v = new URLSearchParams(location.search).get(k); return v === null ? d : +v; }
+  var W = num('w', 360), H = num('h', 169), R = num('r', 26);
+  var padT = num('pt', 16), padS = num('ps', 16), padB = num('pb', 18);
+  var chartH = num('ch', 78), chartW = num('cw', 300);
+  var nameSz = num('name', 16), bigSz = num('big', 28);
+
+  var card = document.getElementById('card');
+  card.style.width = W + 'px'; card.style.height = H + 'px'; card.style.borderRadius = R + 'px';
+  card.style.padding = padT + 'px ' + padS + 'px ' + padB + 'px ' + padS + 'px';
+
+  var hdr = document.createElement('div'); hdr.className = 'top';
+  hdr.innerHTML =
+    '<div class="left">' +
+      '<div class="name" style="font-size:' + nameSz + 'px">CEDAR TUB</div>' +
+      '<div class="status" style="font-size:10px;margin-top:2px">HEATING&nbsp;&nbsp;·&nbsp;&nbsp;FILTER ON</div>' +
+    '</div>' +
+    '<div class="right">' +
+      '<div class="big" style="font-size:' + bigSz + 'px">102°F</div>' +
+      '<div class="set" style="font-size:11px;margin-top:2px">Set 104°F</div>' +
+    '</div>';
+  card.appendChild(hdr);
+
+  var spacer = document.createElement('div'); spacer.style.height = '8px'; card.appendChild(spacer);
+
+  var contentW = W - 2 * padS;
+  var svgW = Math.min(chartW, contentW), svgH = chartH;
+  var data = [96,97,99,100,101,101,102,103,104,104,103,104,104,103,104,104,104,103,103,104,103,103,102,102];
+  var target = 104, padX = 6, pTop = 8, pBot = 6;
+  var lo = Math.min.apply(null, data.concat([target])) - 1;
+  var hi = Math.max.apply(null, data.concat([target])) + 1;
+  function X(i){ return padX + (svgW - 2*padX) * (i/(data.length-1)); }
+  function Y(v){ return pTop + (svgH - pTop - pBot) * (1 - (v-lo)/(hi-lo)); }
+  var pts = data.map(function(v,i){ return { x:X(i), y:Y(v) }; });
+  var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+  for (var i=0;i<pts.length-1;i++){
+    var p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||pts[i+1];
+    var c1x=p1.x+(p2.x-p0.x)/6, c1y=p1.y+(p2.y-p0.y)/6, c2x=p2.x-(p3.x-p1.x)/6, c2y=p2.y-(p3.y-p1.y)/6;
+    d += ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + p2.x + ' ' + p2.y;
+  }
+  var ty = Y(target);
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'width:' + contentW + 'px;display:flex;justify-content:center';
+  wrap.innerHTML =
+    '<svg width="' + svgW + '" height="' + svgH + '" viewBox="0 0 ' + svgW + ' ' + svgH + '">' +
+    '<line x1="' + padX + '" y1="' + ty + '" x2="' + (svgW-padX) + '" y2="' + ty + '" stroke="#5f6368" stroke-width="1.5" stroke-dasharray="8 8"/>' +
+    '<path d="' + d + '" fill="none" stroke="#fdd663" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+  card.appendChild(wrap);
+
+  var foot = document.createElement('div'); foot.className = 'foot'; foot.style.fontSize = '9px';
+  foot.textContent = 'last 24h · set 104°F';
+  card.appendChild(foot);
+  document.title = 'ready';
+} catch (e) { document.title = 'ERR:' + e.message; }
+</script>
+</body>
+</html>
