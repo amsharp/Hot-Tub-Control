@@ -148,16 +148,21 @@ export const config = {
     blowerW: Number(process.env.ENERGY_BLOWER_W) || 600,
     rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh fallback (TOU disabled)
     ratePeak: Number(process.env.ELECTRICITY_RATE_PEAK) || 0, // $/kWh during peak (0 = same as rate)
-    // SCE TOU-D-PRIME time-of-use pricing (bundled $/kWh). On by default; set
-    // TOU_ENABLED=false to fall back to the flat rate/ratePeak pair. Defaults
-    // are the published TOU-D-PRIME rates; override any single period via env.
+    // SCE TOU-D-PRIME time-of-use pricing, bundled $/kWh as published on
+    // sce.com's residential TOU rate-plans page (June 2026 tariff; SCE rounds
+    // to whole cents there). PRIME has no baseline credit, so these ARE the
+    // effective marginal prices. The $0.79/day Base Services Charge is not
+    // modeled — it accrues with or without the tub. On by default; set
+    // TOU_ENABLED=false to fall back to the flat rate/ratePeak pair; override
+    // any single period via env.
     tou: {
       enabled: bool(process.env.TOU_ENABLED, true),
-      summerOn: Number(process.env.TOU_SUMMER_ON) || 0,
-      summerOff: Number(process.env.TOU_SUMMER_OFF) || 0,
-      winterMid: Number(process.env.TOU_WINTER_MID) || 0,
-      winterSoff: Number(process.env.TOU_WINTER_SOFF) || 0,
-      winterOff: Number(process.env.TOU_WINTER_OFF) || 0,
+      summerOn: Number(process.env.TOU_SUMMER_ON) || 0.59, // Jun-Sep 4-9 PM weekdays
+      summerMid: Number(process.env.TOU_SUMMER_MID) || 0.4, // Jun-Sep 4-9 PM weekends
+      summerOff: Number(process.env.TOU_SUMMER_OFF) || 0.26, // Jun-Sep all other hours
+      winterMid: Number(process.env.TOU_WINTER_MID) || 0.56, // Oct-May 4-9 PM
+      winterSoff: Number(process.env.TOU_WINTER_SOFF) || 0.24, // Oct-May 8 AM-4 PM
+      winterOff: Number(process.env.TOU_WINTER_OFF) || 0.24, // Oct-May 9 PM-8 AM
     },
   },
 
