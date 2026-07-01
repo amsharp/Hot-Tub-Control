@@ -85,6 +85,17 @@ export const config = {
     clientSecret: process.env.OAUTH_CLIENT_SECRET || '',
     linkUsername: process.env.LINK_USERNAME || 'owner',
     linkPassword: process.env.LINK_PASSWORD || '',
+    // Allowed redirect_uri origins for the OAuth flow. Any redirect_uri whose
+    // origin isn't listed is rejected, so a crafted authorize link can't exfil
+    // an auth code to an attacker host. Defaults to Google's account-linking
+    // origins; override (comma-separated) with OAUTH_REDIRECT_ALLOWLIST.
+    redirectAllowlist: (
+      process.env.OAUTH_REDIRECT_ALLOWLIST ||
+      'https://oauth-redirect.googleusercontent.com,https://oauth-redirect-sandbox.googleusercontent.com'
+    )
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   },
 
   homegraph: {

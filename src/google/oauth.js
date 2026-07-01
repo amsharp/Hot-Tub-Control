@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { JsonStore } from '../store.js';
 import { log } from '../log.js';
+import { safeEqual } from '../secure.js';
 
 const ACCESS_TTL_MS = 24 * 3600 * 1000; // 1 day
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -18,6 +19,38 @@ const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const store = new JsonStore('oauth.json', { codes: {}, access: {}, refresh: {} });
 
 const newToken = (n = 32) => randomBytes(n).toString('hex');
+
+// A configured secret matches ONLY when it's non-empty AND equal (constant-time).
+// This refuses to authenticate against an unset/empty secret (fail-closed).
+const secretMatches = (provided, configured) => !!configured && safeEqual(provided, configured);
+
+// Reject any redirect_uri whose origin isn't allowlisted (prevents leaking an
+// auth code to an attacker-controlled host).
+function redirectAllowed(uri) {
+  try {
+    return config.oauth.redirectAllowlist.includes(new URL(uri).origin);
+  } catch {
+    return false;
+  }
+}
+
+// Small in-memory throttle on failed consent-password attempts, keyed by client
+// IP, to blunt brute-forcing the link password (no external dependency).
+const attempts = new Map(); // ip -> { count, resetAt }
+const MAX_ATTEMPTS = 8;
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+function tooManyAttempts(ip) {
+  const now = Date.now();
+  const rec = attempts.get(ip);
+  if (!rec || rec.resetAt < now) return false;
+  return rec.count >= MAX_ATTEMPTS;
+}
+function recordFailure(ip) {
+  const now = Date.now();
+  const rec = attempts.get(ip);
+  if (!rec || rec.resetAt < now) attempts.set(ip, { count: 1, resetAt: now + ATTEMPT_WINDOW_MS });
+  else rec.count += 1;
+}
 
 function pruneExpired() {
   const now = Date.now();
@@ -93,6 +126,10 @@ export function registerOAuthRoutes(app) {
       res.status(400).send('Unknown client_id');
       return;
     }
+    if (!redirect_uri || !redirectAllowed(redirect_uri)) {
+      res.status(400).send('Invalid redirect_uri');
+      return;
+    }
     res.set('content-type', 'text/html').send(
       consentPage({
         clientId: client_id,
@@ -110,9 +147,30 @@ export function registerOAuthRoutes(app) {
       res.status(400).send('Unknown client_id');
       return;
     }
+    if (!redirect_uri || !redirectAllowed(redirect_uri)) {
+      res.status(400).send('Invalid redirect_uri');
+      return;
+    }
+    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+    if (tooManyAttempts(ip)) {
+      res.status(429).set('content-type', 'text/html').send(
+        consentPage({
+          clientId: client_id,
+          redirectUri: redirect_uri,
+          state,
+          responseType: response_type,
+          error: 'Too many attempts. Try again later.',
+        }),
+      );
+      return;
+    }
+    // Constant-time credential check; a mismatch on either field fails the same
+    // way, and empty configured creds never authenticate.
     const ok =
-      username === config.oauth.linkUsername && password === config.oauth.linkPassword;
+      secretMatches(username, config.oauth.linkUsername) &&
+      secretMatches(password, config.oauth.linkPassword);
     if (!ok) {
+      recordFailure(ip);
       res
         .status(401)
         .set('content-type', 'text/html')
@@ -146,7 +204,7 @@ export function registerOAuthRoutes(app) {
   // Step 2: token endpoint (authorization_code + refresh_token grants).
   app.post('/oauth/token', (req, res) => {
     const { client_id, client_secret, grant_type } = req.body;
-    if (client_id !== config.oauth.clientId || client_secret !== config.oauth.clientSecret) {
+    if (client_id !== config.oauth.clientId || !secretMatches(client_secret, config.oauth.clientSecret)) {
       res.status(401).json({ error: 'invalid_client' });
       return;
     }
@@ -155,6 +213,14 @@ export function registerOAuthRoutes(app) {
     if (grant_type === 'authorization_code') {
       const rec = store.data.codes[req.body.code];
       if (!rec || rec.expiresAt < Date.now()) {
+        res.status(400).json({ error: 'invalid_grant' });
+        return;
+      }
+      // Bind the code to the client and redirect_uri it was issued for (RFC 6749
+      // §4.1.3), so a code leaked to another host/client can't be redeemed.
+      if (rec.clientId !== client_id || rec.redirectUri !== req.body.redirect_uri) {
+        delete store.data.codes[req.body.code];
+        store.save();
         res.status(400).json({ error: 'invalid_grant' });
         return;
       }

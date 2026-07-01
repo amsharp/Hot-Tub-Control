@@ -14,16 +14,26 @@ import { handleSmartHomeRequest } from './google/smarthome.js';
 import { reportState } from './google/homegraph.js';
 import { formatStatus } from './notify/notifier.js';
 import { ACTIONS } from './scheduler/scheduler.js';
+import { safeEqual } from './secure.js';
 
 // Admin token guards the schedule API. Defaults to the OAuth client secret so
-// there's always *some* gate; override with ADMIN_TOKEN if you prefer.
+// there's always *some* gate; override with ADMIN_TOKEN if you prefer (strongly
+// recommended — see the warning below).
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || config.oauth.clientSecret;
+if (!process.env.ADMIN_TOKEN && config.oauth.clientSecret) {
+  log.warn(
+    'ADMIN_TOKEN not set — falling back to the OAuth client secret for the admin API. ' +
+      'That secret is shared with Google; set a dedicated ADMIN_TOKEN so it does not ' +
+      'double as the tub control password.',
+  );
+}
 
 function requireAdmin(req, res, next) {
   // Accept the token via header (HUD) or ?token= query (iOS Shortcuts/Scriptable
-  // widgets, which send plain URLs without custom headers).
+  // widgets, which send plain URLs without custom headers). Constant-time compare;
+  // fail closed when no admin token is configured.
   const token = req.get('x-admin-token') || req.query.token;
-  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+  if (!ADMIN_TOKEN || !safeEqual(token, ADMIN_TOKEN)) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
@@ -233,6 +243,7 @@ export function createServer({ client, scheduler, watchdog, history, rawlog, flo
   // Respond as soon as the command is accepted; refresh state + push to Google
   // asynchronously so callers aren't blocked on a second cloud round-trip.
   function afterControl(res) {
+    res.set('Cache-Control', 'no-store'); // control results must never be cached
     res.json({ ok: true });
     client
       .getStatus()
