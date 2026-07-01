@@ -22,7 +22,9 @@ async function getJSON(path) {
 
 const w = new ListWidget();
 w.backgroundColor = BG;
-w.setPadding(14, 16, 12, 16);
+// Extra bottom inset so the footer clears the widget's rounded corner (small
+// text placed right in the corner curve gets its first glyph clipped).
+w.setPadding(14, 16, 22, 16);
 w.url = BASE; // tap opens the full controls
 
 let s = null;
