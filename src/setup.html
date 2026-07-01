@@ -105,11 +105,17 @@ if (!s) {
   set.font = Font.semiboldSystemFont(11); set.textColor = SECOND; set.rightAlignText();
 
   w.addSpacer(6);
-  const wi = w.addImage(chartImage(samples, Math.round(s.targetTemp), 640, 150));
-  wi.imageSize = new Size(330, 77); wi.centerAlignImage();
+  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 640, 150) : null;
+  if (img) {
+    const wi = w.addImage(img);
+    wi.imageSize = new Size(330, 77); wi.centerAlignImage();
+  } else {
+    const ph = w.addText("collecting hourly history…");
+    ph.font = Font.systemFont(11); ph.textColor = SECOND;
+  }
 
   w.addSpacer(3);
-  const foot = w.addText(samples.length >= 2 ? ("last " + samples.length + "h") : "collecting hourly history…");
+  const foot = w.addText(samples.length >= 2 ? ("last " + samples.length + "h") : "24h chart builds hourly");
   foot.font = Font.systemFont(9); foot.textColor = SECOND;
 }
 
@@ -125,7 +131,7 @@ function chartImage(samples, target, W, H) {
   ctx.opaque = false;
   ctx.respectScreenScale = true;
   const n = samples.length;
-  if (n < 2) return ctx.getImage();
+  if (n < 2) return null;
   const fs = samples.map((p) => p.f);
   let lo = Math.min.apply(null, fs.concat([target]));
   let hi = Math.max.apply(null, fs.concat([target]));
