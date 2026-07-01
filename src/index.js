@@ -12,6 +12,7 @@ import { History } from './history.js';
 import { ThermalModel } from './thermal/model.js';
 import { SmartHeatPlanner } from './thermal/planner.js';
 import { EnergyMeter } from './energy.js';
+import { WeatherProvider } from './weather.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -49,8 +50,17 @@ async function main() {
     ratePeak: config.energy.ratePeak || config.energy.rate,
   });
 
+  // Forecast-grounded ambient temperature (Open-Meteo). Feeds the cooling model
+  // so overnight cooling is predicted from the real weather; no-op if no location
+  // is configured (the model then uses its static prior ambient).
+  const weather = new WeatherProvider({
+    lat: config.weather.lat,
+    lon: config.weather.lon,
+    refreshMin: config.weather.refreshMin,
+  });
+
   // Self-calibrating heat model + smart pre-heat planner.
-  const model = new ThermalModel();
+  const model = new ThermalModel({ ambientFn: weather.ambientFn() });
   const planner = new SmartHeatPlanner({
     model,
     targetF: config.smartHeat.targetF,
@@ -73,7 +83,7 @@ async function main() {
   async function runSmartHeat(status, tempF, tempReliable = true) {
     const now = Date.now();
     const { min, day } = localNow();
-    const p = planner.plan(tempF, min, day);
+    const p = planner.plan(tempF, min, day, now);
     const running = !!(status.power || status.heat || status.filter);
 
     // Detect a manual override (SaluSpa app / Google Home / HUD) that contradicts
@@ -163,14 +173,22 @@ async function main() {
     }
   }
 
-  const getPlan = () => ({
-    enabled: config.smartHeat.enabled,
-    targetF: config.smartHeat.targetF,
-    targetMin: config.smartHeat.targetMin,
-    peaks: config.smartHeat.peaks,
-    plan: lastPlan,
-    model: { heat: model.heatParams(), cool: model.coolParams(), ...model.stats() },
-  });
+  const getPlan = () => {
+    const now = Date.now();
+    return {
+      enabled: config.smartHeat.enabled,
+      targetF: config.smartHeat.targetF,
+      targetMin: config.smartHeat.targetMin,
+      peaks: config.smartHeat.peaks,
+      plan: lastPlan,
+      model: { heat: model.heatParams(), cool: model.coolParams(now), ...model.stats() },
+      weather: {
+        enabled: weather.enabled,
+        ambientNowF: weather.enabled ? weather.ambientAt(now) : null,
+        forecastPoints: weather.series.length,
+      },
+    };
+  };
 
   const getEnergy = () => meter.summary();
 
@@ -199,6 +217,19 @@ async function main() {
   });
 
   const app = createServer({ client, scheduler, watchdog, history, getPlan, getEnergy });
+
+  // Keep the outdoor forecast fresh (used as the cooling model's ambient). Runs
+  // independently of the pump; a no-op when no location is configured.
+  if (weather.enabled) {
+    weather
+      .refresh(true)
+      .then((ok) => ok && log.info(`Weather forecast loaded (${weather.series.length} hourly points).`))
+      .catch((err) => log.warn('Initial weather refresh failed:', err.message));
+    setInterval(
+      () => weather.refresh().catch((err) => log.warn('Weather refresh failed:', err.message)),
+      config.weather.refreshMin * 60_000,
+    ).unref?.();
+  }
 
   // Everything below talks to the pump, so it only runs once credentials exist.
   if (hasBestwayCreds) {

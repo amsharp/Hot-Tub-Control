@@ -61,3 +61,27 @@ test('fmtMin formats minutes-of-day', () => {
   assert.equal(fmtMin(6 * 60), '6:00 AM');
   assert.equal(fmtMin(Infinity), '—');
 });
+
+test('forecast-predictive sizing pre-heats earlier on a colder night', () => {
+  // Model stub: linear 2°F/hr heat-up, Newton cooling toward a fixed ambient so
+  // a colder forecast projects a lower start temp and thus a longer pre-heat.
+  const modelWith = (ambient) => ({
+    hoursToHeat: (from, to) => (from >= to ? 0 : (to - from) / 2),
+    projectCool: (fromTemp, fromTs, toTs) =>
+      ambient + (fromTemp - ambient) * Math.exp(-0.05 * ((toTs - fromTs) / 3_600_000)),
+  });
+  const opts = { targetF: 104, targetMin: 16 * 60, peaks: [], safetyMin: 0 };
+  const nowMin = 6 * 60; // 6 AM
+  const nowMs = nowMin * 60_000; // wall clock consistent with nowMin
+  const warm = new SmartHeatPlanner({ model: modelWith(75), ...opts }).plan(100, nowMin, 1, nowMs);
+  const cold = new SmartHeatPlanner({ model: modelWith(35), ...opts }).plan(100, nowMin, 1, nowMs);
+  assert.ok(cold.startMin < warm.startMin, `cold night starts earlier (${cold.startMin} < ${warm.startMin})`);
+});
+
+test('omitting nowMs keeps the non-predictive behaviour', () => {
+  // No nowMs -> plain hoursToHeat(currentTemp) sizing, projectCool never called.
+  const model = { hoursToHeat: (from, to) => (from >= to ? 0 : 3), projectCool: () => { throw new Error('should not be called'); } };
+  const p = new SmartHeatPlanner({ model, targetF: 104, targetMin: 16 * 60, peaks: [], safetyMin: 0 });
+  const r = p.plan(100, 6 * 60, 1); // no nowMs
+  assert.equal(r.startMin, 16 * 60 - 180); // 960 - 3h
+});

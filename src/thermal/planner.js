@@ -35,14 +35,32 @@ export class SmartHeatPlanner {
    * @param {number} currentTemp current water temp (°F)
    * @param {number} nowMin minutes since local midnight
    * @param {string|number} dayKey stable id for the local day (resets the latch)
+   * @param {number} [nowMs] wall-clock ms — enables forecast-predictive sizing:
+   *   the pre-heat is sized off the temperature the tub is forecast to cool to by
+   *   the chosen start time, so a cold night starts the heater earlier.
    * @returns {{heat: (boolean|null), reason: string, startMin: number, needHours: number, targetMin: number, targetF: number, inPeak: boolean}}
    *   heat === true  -> ensure heater on;  false -> ensure off;  null -> no action.
    */
-  plan(currentTemp, nowMin, dayKey) {
+  plan(currentTemp, nowMin, dayKey, nowMs = null) {
     if (this._committed.day !== dayKey) this._committed = { day: dayKey, active: false };
 
     const inPeak = this.inPeak(nowMin);
-    const needHours = this.model.hoursToHeat(currentTemp, this.targetF);
+    // Predictive sizing: the tub keeps cooling until we start, so heating sized
+    // from the *current* temp underestimates on a cold night. Iterate a couple of
+    // times — project cooling (via the forecast) to the candidate start, then
+    // re-size the heat from that projected-lower temp.
+    let needHours = this.model.hoursToHeat(currentTemp, this.targetF);
+    if (nowMs != null && Number.isFinite(needHours) && typeof this.model.projectCool === 'function') {
+      for (let k = 0; k < 2; k++) {
+        const startM = this.targetMin - needHours * 60 - this.safetyMin;
+        if (startM <= nowMin) break; // start is now/past — no pre-start cooling to model
+        const startTs = nowMs + (startM - nowMin) * 60_000;
+        const tempAtStart = this.model.projectCool(currentTemp, nowMs, startTs);
+        const nh = this.model.hoursToHeat(tempAtStart, this.targetF);
+        if (!Number.isFinite(nh)) break;
+        needHours = nh;
+      }
+    }
     const startMin = Number.isFinite(needHours) ? this.targetMin - needHours * 60 - this.safetyMin : -Infinity;
 
     let heat = null;

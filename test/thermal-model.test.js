@@ -67,3 +67,41 @@ test('estimateTemp projects a stale reading forward when the pump is off', () =>
   assert.equal(est.reliable, false);
   assert.ok(est.tempF < 104, `projected cooler than the stale 104 (${est.tempF})`);
 });
+
+test('estimateTemp follows the forecast ambient (colder forecast -> colder projection)', () => {
+  const H = 3_600_000;
+  const mk = (ambient) => {
+    const m = new ThermalModel({ store: fakeStore(), ambientFn: () => ambient });
+    m.observe(104, false, true, 0);
+    m.observe(104, false, true, 6 * 60_000); // reliable baseline at 104
+    return m.estimateTemp(104, false, 6 * 60_000 + 8 * H).tempF; // 8h off
+  };
+  const cold = mk(40);
+  const warm = mk(70);
+  assert.ok(cold < warm, `cold forecast projects lower (${cold} < ${warm})`);
+  assert.ok(cold < 104 && warm < 104);
+});
+
+test('cooling learns the loss coefficient against the forecast driving ΔT', () => {
+  // Synthetic cooling toward a known ambient (50°F) at a known loss (0.1/hr).
+  const ambient = 50;
+  const loss = 0.1;
+  const m = new ThermalModel({ store: fakeStore(), ambientFn: () => ambient });
+  let T = 100;
+  let t = 0;
+  // Prime a settled, circulating, heater-off streak, then feed cooling steps.
+  m.observe(T, false, true, t);
+  t += 6 * 60_000;
+  m.observe(T, false, true, t);
+  for (let i = 0; i < 40; i++) {
+    const rate = -loss * (T - ambient);
+    const dtH = 0.25;
+    T += rate * dtH;
+    t += dtH * 3_600_000;
+    m.observe(T, false, true, t);
+  }
+  const p = m.coolParams(t);
+  assert.ok(m.stats().coolSamples >= 8, `enough samples (${m.stats().coolSamples})`);
+  assert.ok(Math.abs(p.loss - loss) < 0.03, `learned loss ~${p.loss.toFixed(3)}`);
+  assert.equal(p.ambient, ambient, 'ambient comes from the forecast, not learned');
+});

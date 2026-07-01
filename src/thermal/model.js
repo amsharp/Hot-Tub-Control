@@ -50,13 +50,27 @@ function regress(s) {
 }
 
 export class ThermalModel {
-  /** @param {object} [opts] @param {JsonStore} [opts.store] injectable for tests */
-  constructor({ store } = {}) {
+  /**
+   * @param {object} [opts]
+   * @param {JsonStore} [opts.store] injectable for tests
+   * @param {(ts:number)=>(number|null)} [opts.ambientFn] forecast ambient (°F) at
+   *   a timestamp; when it returns a number the cooling law is grounded to the
+   *   real outdoor forecast and the model learns only the tub's insulation loss.
+   *   Returning null (or omitting it) falls back to the static prior ambient.
+   */
+  constructor({ store, ambientFn } = {}) {
     this.store = store || new JsonStore('thermal.json', { heat: emptySums(), cool: emptySums(), last: null });
+    this.ambientFn = typeof ambientFn === 'function' ? ambientFn : () => null;
     const d = this.store.data;
     if (!d.heat) d.heat = emptySums();
     if (!d.cool) d.cool = emptySums();
     if (!('last' in d)) d.last = null;
+  }
+
+  /** Forecast ambient at `ts`, falling back to the static prior when unknown. */
+  _ambientAt(ts) {
+    const a = this.ambientFn(ts);
+    return Number.isFinite(a) ? a : PRIOR.cool.ambient;
   }
 
   /**
@@ -95,19 +109,28 @@ export class ThermalModel {
       const dtH = (now - d.offFrom.t) / 3_600_000;
       const dT = tempF - d.offFrom.T;
       if (dtH >= MIN_DT_HOURS && Math.abs(dT) >= MIN_DTEMP) {
-        add(d.cool, (tempF + d.offFrom.T) / 2, dT / dtH);
+        // Regress rate against the driving ΔT (T − ambient) so we learn the loss
+        // coefficient alone; ambient comes from the forecast at the gap midpoint.
+        const amb = this._ambientAt((d.offFrom.t + now) / 2);
+        add(d.cool, (tempF + d.offFrom.T) / 2 - amb, dT / dtH);
         learned = true;
       }
       d.offFrom = null;
       d.last = { t: now, T: tempF, heat: !!heatOn };
     } else {
       const last = d.last;
-      const sums = heatOn ? d.heat : d.cool;
       if (last && last.heat === !!heatOn) {
         const dtH = (now - last.t) / 3_600_000;
         const dT = tempF - last.T;
         if (dtH >= MIN_DT_HOURS && Math.abs(dT) >= MIN_DTEMP) {
-          add(sums, (tempF + last.T) / 2, dT / dtH);
+          const meanT = (tempF + last.T) / 2;
+          const rate = dT / dtH;
+          if (heatOn) {
+            add(d.heat, meanT, rate); // heating: learn loss + equilibrium (teq)
+          } else {
+            const amb = this._ambientAt((last.t + now) / 2);
+            add(d.cool, meanT - amb, rate); // cooling: learn loss vs (T − ambient)
+          }
           d.last = { t: now, T: tempF, heat: !!heatOn };
           learned = true;
         }
@@ -130,10 +153,29 @@ export class ThermalModel {
     const d = this.store.data;
     const reliable = circulating && d.circSince != null && now - d.circSince >= SETTLE_MS;
     if (reliable || !d.lastReliable) return { tempF: rawTemp, reliable: !!reliable };
-    const { loss, ambient } = this.coolParams();
-    const dtH = Math.max(0, (now - d.lastReliable.t) / 3_600_000);
-    const T = ambient + (d.lastReliable.T - ambient) * Math.exp(-loss * dtH);
+    const T = this.projectCool(d.lastReliable.T, d.lastReliable.t, now);
     return { tempF: Math.round(T), reliable: false };
+  }
+
+  /**
+   * Project a temperature forward under the cooling law from `fromTs` to `toTs`,
+   * integrating hour-by-hour so a *time-varying* forecast ambient is honoured
+   * (an overnight projection follows the night's actual temperature dip and
+   * morning rise). Falls back to a constant prior ambient when no forecast.
+   */
+  projectCool(fromTemp, fromTs, toTs) {
+    const { loss } = this.coolParams(fromTs);
+    const STEP = 3_600_000;
+    let T = fromTemp;
+    let t = fromTs;
+    let guard = 0;
+    while (t < toTs && guard++ < 100_000) {
+      const dt = Math.min(STEP, toTs - t);
+      const amb = this._ambientAt(t + dt / 2);
+      T = amb + (T - amb) * Math.exp(-loss * (dt / 3_600_000));
+      t += dt;
+    }
+    return T;
   }
 
   /** Learned (or prior) heating parameters: { loss (per hr), teq (°F) }. */
@@ -148,16 +190,23 @@ export class ThermalModel {
     return { ...PRIOR.heat };
   }
 
-  /** Learned (or prior) cooling parameters: { loss (per hr), ambient (°F) }. */
-  coolParams() {
+  /**
+   * Cooling parameters: { loss (per hr), ambient (°F) }. `loss` is learned from a
+   * through-origin fit of cooling rate against the driving ΔT (T − ambient), so
+   * it isolates the tub's insulation — a season-stable property. `ambient` is NOT
+   * learned: it comes from the forecast at `atTs` (or the static prior when no
+   * forecast/timestamp is available).
+   */
+  coolParams(atTs) {
     const s = this.store.data.cool;
-    const r = regress(s);
-    if (s.n >= MIN_SAMPLES && r && r.slope < 0) {
-      const loss = -r.slope;
-      const ambient = r.intercept / loss;
-      if (loss > 0.005 && ambient > 20 && ambient < 100) return { loss, ambient };
+    let loss = PRIOR.cool.loss;
+    if (s.n >= MIN_SAMPLES && s.xx > 1e-9) {
+      const l = -(s.xy / s.xx); // through-origin slope of rate vs (T − ambient)
+      if (l > 0.005 && l < 1) loss = l;
     }
-    return { ...PRIOR.cool };
+    const forecast = atTs != null ? this.ambientFn(atTs) : null;
+    const ambient = Number.isFinite(forecast) ? forecast : PRIOR.cool.ambient;
+    return { loss, ambient };
   }
 
   /**

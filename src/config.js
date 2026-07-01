@@ -107,6 +107,27 @@ export const config = {
     safetyMin: Number(process.env.SMART_HEAT_SAFETY_MIN) || 45,
   },
 
+  // Forecast-grounded ambient temperature. When a location is set, the thermal
+  // model uses the real hourly outdoor forecast (Open-Meteo, no API key) as the
+  // ambient in its cooling law instead of a static guess — so overnight cooling
+  // is predicted from the actual weather, and the model learns only the tub's
+  // insulation loss (which is season-stable). Unset lat/lon -> falls back to the
+  // static prior ambient (behaves as before).
+  weather: {
+    lat:
+      process.env.WEATHER_LAT !== undefined && process.env.WEATHER_LAT !== ''
+        ? Number(process.env.WEATHER_LAT)
+        : null,
+    lon:
+      process.env.WEATHER_LON !== undefined && process.env.WEATHER_LON !== ''
+        ? Number(process.env.WEATHER_LON)
+        : null,
+    get enabled() {
+      return Number.isFinite(this.lat) && Number.isFinite(this.lon);
+    },
+    refreshMin: Number(process.env.WEATHER_REFRESH_MIN) || 120,
+  },
+
   // Software energy estimate (the pump has no meter). Grounded to a US 120V/12A
   // SaluSpa Airjet: heater ~1300W (only when actively firing), blower ~600W,
   // circulation pump ~40W.
