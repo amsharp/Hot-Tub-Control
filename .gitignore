@@ -1,0 +1,11 @@
+node_modules/
+.env
+*.log
+
+# Runtime state (tokens, schedules) — keep the folder, ignore its contents
+/data/*.json
+!/data/.gitkeep
+
+# Service-account credentials for Google Home Graph — never commit
+secrets/
+*.serviceaccount.json

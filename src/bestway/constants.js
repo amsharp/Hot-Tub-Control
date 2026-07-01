@@ -1,0 +1,92 @@
+// Constants for the Bestway cloud API, which is built on the Gizwits IoT
+// platform. These values were derived from the community Home Assistant
+// integration (github.com/cdpuk/ha-bestway) and the Gizwits app protocol.
+//
+// If a key name turns out to be wrong for your specific firmware, run
+// `npm run cli -- dump` to print the raw attribute dictionary your pump
+// reports, then adjust AIRJET_PROFILE.attrs below to match.
+
+// The Gizwits "application id" the Bestway Smart Hub app authenticates with.
+export const GIZWITS_APP_ID = '98754e684ec045528b073876c34c7348';
+
+// Regional API roots. Pick via BESTWAY_REGION ("eu" | "us").
+export const API_ROOTS = {
+  eu: 'https://euapi.gizwits.com',
+  us: 'https://usapi.gizwits.com',
+};
+
+export function apiRootForRegion(region) {
+  return API_ROOTS[region] || API_ROOTS.eu;
+}
+
+// Attribute profile for the classic WiFi "Airjet" pump (product_name "Airjet",
+// Gizwits backend). The `attrs` map translates our internal field names to the
+// raw Gizwits attribute keys used in /devdata and /control payloads.
+export const AIRJET_PROFILE = {
+  productName: 'Airjet',
+  attrs: {
+    currentTemp: 'temp_now', // current water temperature (integer)
+    targetTemp: 'temp_set', // target temperature (integer)
+    tempUnit: 'temp_set_unit', // 0/"C" Celsius, 1/"F" Fahrenheit
+    power: 'power', // pump unit power 0/1
+    heat: 'heat_power', // heater 0/1
+    filter: 'filter_power', // filter/circulation pump 0/1
+    bubbles: 'wave_power', // bubble massage (AirJet) 0/1
+    locked: 'locked', // child lock 0/1
+  },
+  on: 1,
+  off: 0,
+  // Safe target-temperature limits for an Airjet spa, in each unit.
+  tempRange: {
+    C: { min: 20, max: 40 },
+    F: { min: 68, max: 104 },
+  },
+};
+
+// Product names that we recognise as a spa we can drive with AIRJET_PROFILE.
+export const SPA_PRODUCT_NAMES = new Set(['Airjet', 'Airjet_V01']);
+
+// Human-readable meanings for the common Lay-Z-Spa error codes.
+export const ERROR_MEANINGS = {
+  E01: 'Water flow sensor (flow paddle) fault',
+  E02: 'Low water flow — circulation too low (often dirty filter / low water)',
+  E03: 'Dry-fire / water temperature sensor fault',
+  E04: 'Water temperature sensor fault',
+  E05: 'Water over-temperature',
+  E07: 'Heater / control fault',
+  E09: 'Communication fault',
+  earth: 'Ground (earth) fault detected',
+};
+
+// "E32" is not a fault — it signals the heater is on but the target has already
+// been reached. We must never treat it as an error.
+const NON_FAULT_CODES = new Set(['E32']);
+
+// Faults we will attempt to clear automatically with a pump restart. E02
+// (low flow) is the classic one that a circulation restart often clears.
+export const AUTO_CLEARABLE_CODES = new Set(['E02']);
+
+/**
+ * Scan a raw attribute dictionary for active faults.
+ * @returns {{code:string,meaning:string,autoClearable:boolean}[]}
+ */
+export function detectFaults(attr = {}) {
+  const faults = [];
+  for (const [key, value] of Object.entries(attr)) {
+    const isErrorKey =
+      /^E\d{2}$/.test(key) || /^system_err\d+$/.test(key) || key === 'earth';
+    if (!isErrorKey) continue;
+    if (NON_FAULT_CODES.has(key)) continue;
+    if (!truthy(value)) continue;
+    faults.push({
+      code: key,
+      meaning: ERROR_MEANINGS[key] || 'Unknown fault',
+      autoClearable: AUTO_CLEARABLE_CODES.has(key),
+    });
+  }
+  return faults;
+}
+
+function truthy(v) {
+  return v === 1 || v === '1' || v === true;
+}

@@ -1,0 +1,22 @@
+{
+  "name": "hot-tub-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Schedule and voice-control a Bestway Airjet hot tub via Google Home (standalone Google Smart Home Action).",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "bin": {
+    "spa": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "cli": "node src/cli.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
+  }
+}
