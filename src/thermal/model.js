@@ -19,6 +19,10 @@ const PRIOR = {
 const MIN_SAMPLES = 8; // observations before trusting a learned regression
 const MIN_DT_HOURS = 1 / 6; // ignore intervals < 10 min
 const MIN_DTEMP = 1; // require >= 1 °F change (the pump reports whole degrees)
+// The temp sensor only reads true bulk water temp while the pump circulates;
+// after circulation starts it takes a few minutes to settle. Readings while the
+// pump is off (or not yet settled) are untrustworthy and never used for learning.
+const SETTLE_MS = 5 * 60_000;
 
 function emptySums() {
   return { n: 0, x: 0, y: 0, xx: 0, xy: 0 };
@@ -50,30 +54,80 @@ export class ThermalModel {
   }
 
   /**
-   * Feed a temperature reading with the current heater state. Accumulates a
-   * learning observation once enough time/temperature has passed (to beat the
-   * pump's 1 °F quantization). Returns true when an observation was recorded.
+   * Feed a reading with the heater state AND whether the pump is circulating.
+   * Only settled, circulating readings are trusted:
+   *  - continuous circulation + heater on  -> heating-rate observation
+   *  - continuous circulation + heater off  -> cooling-rate observation
+   *  - a settled reading right after an off period -> one cooling observation
+   *    across the whole off gap (settle-to-settle delta), since stagnant off-time
+   *    readings are unusable.
+   * Returns true when a learning observation was recorded.
    */
-  observe(tempF, heatOn, now) {
+  observe(tempF, heatOn, circulating, now) {
     const d = this.store.data;
-    const last = d.last;
-    // Reset the baseline whenever the heater state flips (rates aren't comparable
-    // across a transition) or on the very first reading.
-    if (!last || last.heat !== !!heatOn) {
-      d.last = { t: now, T: tempF, heat: !!heatOn };
+
+    if (!circulating) {
+      // Pump off -> stagnant sensor. Bank the last trustworthy temp as the start
+      // of a cooling gap and stop learning until circulation resumes and settles.
+      if (d.lastReliable && !d.offFrom) d.offFrom = { ...d.lastReliable };
+      d.circSince = null;
+      d.last = null; // break any continuous streak
       this.store.save();
       return false;
     }
-    const dtH = (now - last.t) / 3_600_000;
-    const dT = tempF - last.T;
-    if (dtH >= MIN_DT_HOURS && Math.abs(dT) >= MIN_DTEMP) {
-      add(heatOn ? d.heat : d.cool, (tempF + last.T) / 2, dT / dtH);
-      d.last = { t: now, T: tempF, heat: !!heatOn };
-      this.store.save();
-      return true;
+
+    if (d.circSince == null) d.circSince = now;
+    if (now - d.circSince < SETTLE_MS) {
+      this.store.save(); // still settling — don't trust the reading yet
+      return false;
     }
-    // Not enough change yet — keep the baseline and accumulate.
-    return false;
+
+    let learned = false;
+    if (d.offFrom) {
+      // First settled reading after an off period: one cooling observation across
+      // the gap (the heater was off, so this captures overnight/coast cooling).
+      const dtH = (now - d.offFrom.t) / 3_600_000;
+      const dT = tempF - d.offFrom.T;
+      if (dtH >= MIN_DT_HOURS && Math.abs(dT) >= MIN_DTEMP) {
+        add(d.cool, (tempF + d.offFrom.T) / 2, dT / dtH);
+        learned = true;
+      }
+      d.offFrom = null;
+      d.last = { t: now, T: tempF, heat: !!heatOn };
+    } else {
+      const last = d.last;
+      const sums = heatOn ? d.heat : d.cool;
+      if (last && last.heat === !!heatOn) {
+        const dtH = (now - last.t) / 3_600_000;
+        const dT = tempF - last.T;
+        if (dtH >= MIN_DT_HOURS && Math.abs(dT) >= MIN_DTEMP) {
+          add(sums, (tempF + last.T) / 2, dT / dtH);
+          d.last = { t: now, T: tempF, heat: !!heatOn };
+          learned = true;
+        }
+      } else {
+        d.last = { t: now, T: tempF, heat: !!heatOn };
+      }
+    }
+    d.lastReliable = { t: now, T: tempF };
+    this.store.save();
+    return learned;
+  }
+
+  /**
+   * Best estimate of the current bulk temperature. If the pump is circulating and
+   * settled the raw reading is trusted; otherwise the last trustworthy reading is
+   * projected forward with the cooling model (so a stale, stagnant sensor value
+   * can't fool the planner into starting late).
+   */
+  estimateTemp(rawTemp, circulating, now) {
+    const d = this.store.data;
+    const reliable = circulating && d.circSince != null && now - d.circSince >= SETTLE_MS;
+    if (reliable || !d.lastReliable) return { tempF: rawTemp, reliable: !!reliable };
+    const { loss, ambient } = this.coolParams();
+    const dtH = Math.max(0, (now - d.lastReliable.t) / 3_600_000);
+    const T = ambient + (d.lastReliable.T - ambient) * Math.exp(-loss * dtH);
+    return { tempF: Math.round(T), reliable: false };
   }
 
   /** Learned (or prior) heating parameters: { loss (per hr), teq (°F) }. */

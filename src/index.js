@@ -62,7 +62,7 @@ async function main() {
     };
   }
 
-  async function runSmartHeat(status, tempF) {
+  async function runSmartHeat(status, tempF, tempReliable = true) {
     const now = Date.now();
     const { min, day } = localNow();
     const p = planner.plan(tempF, min, day);
@@ -88,6 +88,7 @@ async function main() {
     lastPlan = {
       ...p,
       currentTemp: tempF,
+      tempReliable,
       nowMin: min,
       overridden,
       reason: overridden ? 'override' : p.reason,
@@ -127,14 +128,17 @@ async function main() {
       log.warn('History record failed:', err.message);
     }
     if (tempF != null) {
+      const now = Date.now();
+      const circulating = !!status.filter; // sensor only reads true temp while circulating
       try {
-        model.observe(tempF, status.heat, Date.now());
+        model.observe(tempF, status.heat, circulating, now);
       } catch (err) {
         log.warn('Thermal observe failed:', err.message);
       }
       if (config.smartHeat.enabled) {
+        const est = model.estimateTemp(tempF, circulating, now);
         try {
-          await runSmartHeat(status, tempF);
+          await runSmartHeat(status, est.tempF, est.reliable);
         } catch (err) {
           log.warn('SmartHeat failed:', err.message);
         }

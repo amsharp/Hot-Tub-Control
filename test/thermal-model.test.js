@@ -26,7 +26,7 @@ test('hoursToHeat is Infinity when target exceeds heating equilibrium', () => {
   assert.equal(m.hoursToHeat(100, 110), Infinity);
 });
 
-test('learns heating params from synthetic Newton data', () => {
+test('learns heating params from synthetic Newton data (circulating + settled)', () => {
   const m = new ThermalModel({ store: fakeStore() });
   const loss = 0.3;
   const teq = 108;
@@ -37,17 +37,33 @@ test('learns heating params from synthetic Newton data', () => {
     const dtH = 0.25; // 15 min steps
     T += rate * dtH;
     t += dtH * 3_600_000;
-    m.observe(T, true, t); // continuous temps; model's own thresholds gate learning
+    m.observe(T, true, true, t); // pump circulating throughout
   }
   const p = m.heatParams();
   assert.ok(Math.abs(p.loss - loss) < 0.08, `loss ~${p.loss.toFixed(3)}`);
   assert.ok(Math.abs(p.teq - teq) < 3, `teq ~${p.teq.toFixed(2)}`);
 });
 
-test('a heater-state flip resets the learning baseline (no cross-transition rate)', () => {
+test('ignores stagnant (pump-off) readings; learns cooling from the settle-to-settle delta', () => {
   const m = new ThermalModel({ store: fakeStore() });
-  m.observe(95, true, 0);
-  const flipped = m.observe(96, false, 20 * 60_000); // state changed -> should not record
-  assert.equal(flipped, false);
-  assert.equal(m.stats().heatSamples, 0);
+  const H = 3_600_000;
+  // A trustworthy reading while circulating + settled.
+  m.observe(104, true, true, 0);
+  m.observe(104, true, true, 6 * 60_000);
+  // Pump off overnight: stagnant sensor reads garbage — must be ignored.
+  m.observe(103, false, false, 7 * 60_000);
+  m.observe(130, false, false, 3 * H);
+  // Circulation resumes; first reading isn't settled yet, the next one is (96 °F).
+  m.observe(96, false, true, 15 * H);
+  m.observe(96, false, true, 15 * H + 6 * 60_000);
+  assert.ok(m.stats().coolSamples >= 1, 'recorded one cooling observation across the off gap');
+});
+
+test('estimateTemp projects a stale reading forward when the pump is off', () => {
+  const m = new ThermalModel({ store: fakeStore() });
+  m.observe(104, false, true, 0);
+  m.observe(104, false, true, 6 * 60_000); // reliable baseline at 104
+  const est = m.estimateTemp(104, false, 6 * 60_000 + 4 * 3_600_000); // 4h later, pump off
+  assert.equal(est.reliable, false);
+  assert.ok(est.tempF < 104, `projected cooler than the stale 104 (${est.tempF})`);
 });
