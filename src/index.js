@@ -8,6 +8,7 @@ import { FaultWatchdog } from './recovery/watchdog.js';
 import { GizwitsRealtime } from './bestway/realtime.js';
 import { createServer } from './server.js';
 import { reportState, requestSync } from './google/homegraph.js';
+import { History } from './history.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -35,6 +36,19 @@ async function main() {
     onAfterAction: (status) => reportState(status),
   });
 
+  // Rolling hourly temperature history for the widget/HUD chart.
+  const history = new History();
+
+  // Called on every status read: keep the display unit pinned + log history.
+  async function onStatus(status) {
+    await enforceUnit(status);
+    try {
+      history.record(status);
+    } catch (err) {
+      log.warn('History record failed:', err.message);
+    }
+  }
+
   // Keep the pump pinned to the preferred display unit (a power-cycle resets it
   // to Celsius). Fires on startup and on every watchdog cycle.
   async function enforceUnit(status) {
@@ -56,10 +70,10 @@ async function main() {
     maxAttempts: config.watchdog.maxAttempts,
     cooldownMs: config.watchdog.cooldownMs,
     onRecovered: (status) => reportState(status),
-    onStatus: enforceUnit,
+    onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog });
+  const app = createServer({ client, scheduler, watchdog, history });
 
   // Everything below talks to the pump, so it only runs once credentials exist.
   if (hasBestwayCreds) {
@@ -67,7 +81,7 @@ async function main() {
     try {
       const status = await client.getStatus();
       log.info('Connected to spa:', status.name, `(${status.deviceId})`);
-      await enforceUnit(status);
+      await onStatus(status);
     } catch (err) {
       log.warn('Could not read spa status on startup:', err.message);
     }

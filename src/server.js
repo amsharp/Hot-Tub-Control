@@ -38,6 +38,7 @@ function truthyParam(v) {
 // control/read call it makes is gated by the admin token entered in the page.
 const HUD_DIR = dirname(fileURLToPath(import.meta.url));
 const HUD_HTML = readFileSync(join(HUD_DIR, 'hud.html'), 'utf8');
+const SETUP_HTML = readFileSync(join(HUD_DIR, 'setup.html'), 'utf8');
 const HUD_ICON = readFileSync(join(HUD_DIR, 'icon.png'));
 // Web-app manifest so the HUD installs to the home screen as a standalone app.
 const HUD_MANIFEST = {
@@ -54,7 +55,7 @@ const HUD_MANIFEST = {
   ],
 };
 
-export function createServer({ client, scheduler, watchdog }) {
+export function createServer({ client, scheduler, watchdog, history }) {
   const app = express();
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
@@ -63,8 +64,14 @@ export function createServer({ client, scheduler, watchdog }) {
 
   // Web HUD (control panel) + its home-screen app assets.
   app.get(['/', '/hud'], (_req, res) => res.type('html').send(HUD_HTML));
+  app.get('/setup', (_req, res) => res.type('html').send(SETUP_HTML));
   app.get('/icon.png', (_req, res) => res.type('png').send(HUD_ICON));
   app.get('/manifest.json', (_req, res) => res.json(HUD_MANIFEST));
+
+  // 24h temperature history for the widget/HUD chart.
+  app.get('/api/history', requireAdmin, (_req, res) =>
+    res.json({ samples: history ? history.list() : [] }),
+  );
 
   // Force a watchdog cycle now (check faults, auto-clear if applicable).
   app.post('/api/recover', requireAdmin, async (_req, res) => {
