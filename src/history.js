@@ -44,4 +44,11 @@ export class History {
   list() {
     return this.store.data.samples;
   }
+
+  /** Overwrite the buffer (used to seed a synthetic 24h backfill). */
+  replace(samples) {
+    this.store.data.samples = samples.slice(-MAX_POINTS);
+    this.store.save();
+    return this.store.data.samples;
+  }
 }

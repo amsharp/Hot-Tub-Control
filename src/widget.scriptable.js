@@ -11,8 +11,12 @@ const AMBER = new Color("#fdd663");
 const RED = new Color("#f28b82");
 
 async function getJSON(path) {
-  const r = new Request(BASE + path);
+  // Cache-bust so each widget refresh pulls fresh data (iOS/URLCache can
+  // otherwise serve a stale response).
+  const sep = path.indexOf("?") >= 0 ? "&" : "?";
+  const r = new Request(BASE + path + sep + "_=" + Date.now());
   r.timeoutInterval = 15;
+  r.headers = { "Cache-Control": "no-cache" };
   return await r.loadJSON();
 }
 
@@ -62,25 +66,34 @@ if (!s) {
   set.textColor = SECOND;
   set.rightAlignText();
 
-  w.addSpacer(6);
-  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 640, 150) : null;
+  // Size the chart to the widget: medium and large are the same width, large is
+  // taller — so grow the chart height and let a flexible spacer bottom-align.
+  const fam = typeof config !== "undefined" && config.widgetFamily ? config.widgetFamily : "medium";
+  const chartH = fam === "large" ? 168 : 72;
+
+  w.addSpacer(8);
+  const img = samples.length >= 2 ? chartImage(samples, Math.round(s.targetTemp), 656, chartH * 2) : null;
   if (img) {
     const wi = w.addImage(img);
-    wi.imageSize = new Size(330, 77);
+    wi.imageSize = new Size(328, chartH);
     wi.centerAlignImage();
   } else {
+    w.addSpacer(Math.max(4, chartH / 2 - 8));
     const ph = w.addText("collecting hourly history…");
-    ph.font = Font.systemFont(11);
+    ph.font = Font.systemFont(12);
     ph.textColor = SECOND;
+    ph.centerAlignText();
+    w.addSpacer(Math.max(4, chartH / 2 - 8));
   }
 
-  w.addSpacer(3);
-  const foot = w.addText(samples.length >= 2 ? "last " + samples.length + "h" : "24h chart builds hourly");
+  w.addSpacer(); // push footer to the bottom edge
+  const foot = w.addText(samples.length >= 2 ? "last 24h · set " + Math.round(s.targetTemp) + "°F" : "24h chart builds hourly");
   foot.font = Font.systemFont(9);
   foot.textColor = SECOND;
 }
 
-w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
+// Hint iOS to refresh sooner (it still enforces its own budget/cadence).
+w.refreshAfterDate = new Date(Date.now() + 10 * 60 * 1000);
 Script.setWidget(w);
 if (config.runsInApp) w.presentMedium();
 Script.complete();

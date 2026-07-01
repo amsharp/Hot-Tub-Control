@@ -77,6 +77,37 @@ export function createServer({ client, scheduler, watchdog, history }) {
     res.json({ samples: history ? history.list() : [] }),
   );
 
+  // Seed a synthetic 24h backfill (a realistic warm-up-then-hold curve anchored
+  // to the current reading) so the chart isn't empty while real hourly data
+  // accumulates. Real points keep appending and age the fake ones out.
+  app.post('/api/history/seed', requireAdmin, async (req, res) => {
+    if (!history) {
+      res.status(503).json({ error: 'history unavailable' });
+      return;
+    }
+    let target = 104;
+    let cur = 102;
+    try {
+      const s = await client.getStatus();
+      const toF = (v, u) => (v == null ? null : u === 'C' ? Math.round((v * 9) / 5 + 32) : Math.round(v));
+      target = toF(s.targetTemp, s.unit) ?? target;
+      cur = toF(s.currentTemp, s.unit) ?? cur;
+    } catch {
+      /* use defaults if the pump is unreachable */
+    }
+    const now = Date.now();
+    const samples = [];
+    for (let i = 0; i < 24; i++) {
+      const t = now - (23 - i) * 3600_000;
+      // Warm up toward target over the first ~8 hours, then hold with a wobble.
+      let f = 96 + (target - 96) * Math.min(1, i / 8) + Math.sin(i / 2) * 0.8;
+      f = Math.round(Math.max(94, Math.min(target + 1, f)));
+      if (i === 23) f = cur; // anchor the latest point to reality
+      samples.push({ t, f, s: target });
+    }
+    res.json({ ok: true, count: history.replace(samples).length });
+  });
+
   // Force a watchdog cycle now (check faults, auto-clear if applicable).
   app.post('/api/recover', requireAdmin, async (_req, res) => {
     if (!watchdog) {
