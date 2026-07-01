@@ -12,9 +12,15 @@ import { JsonStore } from '../store.js';
 
 // Priors err on the slow side (a Bestway Airjet heats ~1-1.5 °F/hr) so the
 // planner starts pre-heating early enough before it has learned the real rates.
+// The cooling prior is grounded in measured overnight retention: with the cover
+// on, a real night dropped ~4 °F over ~8 h (103->99 °F), i.e. a cooling
+// coefficient near 0.013/hr. We use 0.02/hr — a safety margin above the measured
+// loss so the planner never starts *too late*, but ~6x gentler than the original
+// 0.12/hr, which wrongly imagined the tub crashing to ~75 °F by dawn and kicked
+// the heater on before 5 AM for a rebound that was never needed.
 const PRIOR = {
   heat: { loss: 0.2, teq: 106 }, // ~8h from 95->104 °F
-  cool: { loss: 0.12, ambient: 62 },
+  cool: { loss: 0.02, ambient: 62 }, // covered tub barely cools overnight
 };
 const MIN_SAMPLES = 8; // observations before trusting a learned regression
 const MIN_DT_HOURS = 1 / 6; // ignore intervals < 10 min

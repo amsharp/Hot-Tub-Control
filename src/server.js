@@ -74,9 +74,13 @@ export function createServer({ client, scheduler, watchdog, history, getPlan, ge
   app.get('/icon.png', (_req, res) => res.type('png').send(HUD_ICON));
   app.get('/manifest.json', (_req, res) => res.json(HUD_MANIFEST));
 
-  // 24h temperature history for the widget/HUD chart.
+  // Temperature history: 24h hourly `samples` for the widget chart, plus
+  // `daily` min/max/avg rollups (~13 months) for a long-term view.
   app.get('/api/history', requireAdmin, (_req, res) =>
-    res.json({ samples: history ? history.list() : [] }),
+    res.json({
+      samples: history ? history.list() : [],
+      daily: history && history.daily ? history.daily() : [],
+    }),
   );
 
   // Smart pre-heat plan + learned model (for transparency / the HUD).
