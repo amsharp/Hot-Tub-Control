@@ -11,6 +11,7 @@ import { reportState, requestSync } from './google/homegraph.js';
 import { History } from './history.js';
 import { ThermalModel } from './thermal/model.js';
 import { SmartHeatPlanner } from './thermal/planner.js';
+import { EnergyMeter } from './energy.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -40,6 +41,12 @@ async function main() {
 
   // Rolling hourly temperature history for the widget/HUD chart.
   const history = new History();
+
+  // Software energy estimator.
+  const meter = new EnergyMeter({
+    watts: { heater: config.energy.heaterW, pump: config.energy.pumpW, blower: config.energy.blowerW },
+    rate: config.energy.rate,
+  });
 
   // Self-calibrating heat model + smart pre-heat planner.
   const model = new ThermalModel();
@@ -127,6 +134,14 @@ async function main() {
     } catch (err) {
       log.warn('History record failed:', err.message);
     }
+    // Energy estimate runs regardless of temp reliability.
+    try {
+      const { day } = localNow();
+      meter.sample(status, Date.now(), day, Math.floor(day / 100));
+    } catch (err) {
+      log.warn('Energy sample failed:', err.message);
+    }
+
     if (tempF != null) {
       const now = Date.now();
       const circulating = !!status.filter; // sensor only reads true temp while circulating
@@ -155,6 +170,8 @@ async function main() {
     model: { heat: model.heatParams(), cool: model.coolParams(), ...model.stats() },
   });
 
+  const getEnergy = () => meter.summary();
+
   // Keep the pump pinned to the preferred display unit (a power-cycle resets it
   // to Celsius). Fires on startup and on every watchdog cycle.
   async function enforceUnit(status) {
@@ -179,7 +196,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history, getPlan });
+  const app = createServer({ client, scheduler, watchdog, history, getPlan, getEnergy });
 
   // Everything below talks to the pump, so it only runs once credentials exist.
   if (hasBestwayCreds) {

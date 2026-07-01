@@ -107,6 +107,16 @@ export const config = {
     safetyMin: Number(process.env.SMART_HEAT_SAFETY_MIN) || 45,
   },
 
+  // Software energy estimate (the pump has no meter). Grounded to a US 120V/12A
+  // SaluSpa Airjet: heater ~1300W (only when actively firing), blower ~600W,
+  // circulation pump ~40W.
+  energy: {
+    heaterW: Number(process.env.ENERGY_HEATER_W) || 1300,
+    pumpW: Number(process.env.ENERGY_PUMP_W) || 40,
+    blowerW: Number(process.env.ENERGY_BLOWER_W) || 600,
+    rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh
+  },
+
   watchdog: {
     // Auto-clear transient low-flow (E02) faults by restarting circulation.
     autoClear: bool(process.env.AUTO_CLEAR_LOW_FLOW, true),
