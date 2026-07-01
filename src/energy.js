@@ -44,7 +44,10 @@ export class EnergyMeter {
   wattsFor(status) {
     const raw = status.raw || {};
     let w = 0;
-    if (Number(raw.heat) >= 3) w += this.watts.heater; // element actively firing
+    // heat enum observed live: 0=off, 2=on/idle, 3=element firing, 4=target
+    // reached (standby — element OFF: the ΔT across the heater collapses to ~0
+    // in this state). Count the heater ONLY in state 3.
+    if (Number(raw.heat) === 3) w += this.watts.heater;
     if (status.filter) w += this.watts.pump;
     if (status.bubbles) w += this.watts.blower;
     return w;

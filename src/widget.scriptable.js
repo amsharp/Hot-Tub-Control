@@ -42,11 +42,11 @@ if (!s) {
   t.font = Font.semiboldSystemFont(15);
 } else {
   // Distinguish the element actively firing (raw heat 3 -> HEATING) from merely
-  // holding at target (raw heat 2 -> MAINTAIN, low draw). The pump/circulation is
-  // the "filter" datapoint — label it PUMP.
+  // holding at target (raw heat 2, or 4 = "target reached, element off" ->
+  // MAINTAIN, low draw). The pump/circulation is the "filter" datapoint — PUMP.
   const rawHeat = s.raw && s.raw.heat != null ? Number(s.raw.heat) : s.heat ? 3 : 0;
-  const firing = rawHeat >= 3;
-  const maintaining = rawHeat === 2;
+  const firing = rawHeat === 3;
+  const maintaining = rawHeat === 2 || rawHeat === 4;
   const pumpOn = s.raw && s.raw.filter != null ? Number(s.raw.filter) > 0 : !!s.filter;
   const faulted = s.faults && s.faults.length;
 

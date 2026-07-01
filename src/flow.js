@@ -48,7 +48,9 @@ export class FlowModel {
    */
   compute(status, now = Date.now()) {
     const raw = (status && status.raw) || {};
-    const firing = Number(raw.heat) >= 3;
+    // heat=3 is the only state with the element firing; heat=4 (target reached)
+    // has the element off — confirmed live by the ΔT collapsing to ~0.2 °C.
+    const firing = Number(raw.heat) === 3;
     const pumpOn = !!(status && status.filter) || Number(raw.filter) > 0;
     const t = this.temps(raw);
     const dTc = t ? t.outC - t.inC : null;

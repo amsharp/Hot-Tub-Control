@@ -11,6 +11,7 @@ test('counts the heater only when the element is actively firing (heat=3)', () =
   const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1300, pump: 40, blower: 600 } });
   assert.equal(m.wattsFor({ raw: { heat: 3 }, filter: true }), 1340); // firing + pump
   assert.equal(m.wattsFor({ raw: { heat: 2 }, filter: true }), 40); // idle at target: pump only
+  assert.equal(m.wattsFor({ raw: { heat: 4 }, filter: true }), 40); // target reached (element off): pump only
   assert.equal(m.wattsFor({ raw: { heat: 0 }, filter: false }), 0);
   assert.equal(m.wattsFor({ raw: { heat: 0 }, bubbles: true, filter: true }), 640); // blower + pump
 });

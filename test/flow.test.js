@@ -14,6 +14,16 @@ test('estimates flow from ΔT while the element fires', () => {
   assert.equal(r.shown, r.lpm); // shows the live value while firing
 });
 
+test('target reached (heat=4, element off) — not treated as firing', () => {
+  const m = new FlowModel({ heaterW: 1320 });
+  // Live-observed state: heat=4, ΔT collapsed to ~0.2 °C. Must not produce an
+  // estimate (dividing 1320 W by a near-zero ΔT would claim absurd flow).
+  const r = m.compute({ filter: true, raw: { heat: 4, filter: 2, word2: 408, word7: 41 } });
+  assert.equal(r.firing, false);
+  assert.equal(r.reliable, false);
+  assert.equal(r.lpm, null);
+});
+
 test('heater idle (heat=2) but pump on — shows the last good reading', () => {
   const m = new FlowModel({ heaterW: 1320 });
   const primed = m.compute({ filter: true, raw: { heat: 3, filter: 2, word2: 380, word7: 41 } }); // prime last
