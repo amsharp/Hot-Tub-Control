@@ -122,3 +122,45 @@ export function detectFaults(attr = {}) {
 function truthy(v) {
   return v === 1 || v === '1' || v === true;
 }
+
+function numOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Normalise a raw Gizwits attribute dictionary into our standard status shape
+ * (everything derivable from attrs alone — the caller adds deviceId/name/online).
+ * Shared by the cloud `BestwayClient` and the local `LocalPumpClient` so both
+ * apply identical unit-inversion, on/off-enum and fault logic.
+ */
+export function normalizeStatus(attr = {}, profile = AIRJET_PROFILE) {
+  const a = profile.attrs;
+  const unitRaw = attr[a.tempUnit];
+  const uv = profile.tempUnitValues;
+  const unit = uv
+    ? Number(unitRaw) === uv.C
+      ? 'C'
+      : 'F'
+    : unitRaw === 1 || unitRaw === '1' || unitRaw === 'F'
+      ? 'F'
+      : 'C';
+  // heat/filter are multi-state enums on V01 (0=off, 2=idle, 3=firing…); any
+  // non-zero state is "on", which is also correct for strict 0/1 fields.
+  const isOn = (v) => v === true || Number(v) > 0;
+  const panelTemp = numOrNull(attr[a.currentTemp]);
+  return {
+    power: isOn(attr[a.power]),
+    heat: isOn(attr[a.heat]),
+    filter: isOn(attr[a.filter]),
+    bubbles: isOn(attr[a.bubbles]),
+    locked: isOn(attr[a.locked]),
+    currentTemp: panelTemp,
+    panelTemp,
+    tempSource: 'panel',
+    targetTemp: numOrNull(attr[a.targetTemp]),
+    unit,
+    faults: detectFaults(attr),
+    raw: attr,
+  };
+}

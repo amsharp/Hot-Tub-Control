@@ -7,7 +7,7 @@ import {
   apiRootForRegion,
   AIRJET_PROFILE,
   SPA_PRODUCT_NAMES,
-  detectFaults,
+  normalizeStatus,
 } from './constants.js';
 import { log } from '../log.js';
 
@@ -195,52 +195,13 @@ export class BestwayClient {
     const dev = await this.resolveDevice();
     this._cachedDeviceId = dev.did;
     const attr = await this.rawAttrs(dev.did);
-    const a = this.profile.attrs;
-    const unitRaw = attr[a.tempUnit];
-    // Derive the active display unit from the raw Tunit value. Airjet_V01 maps
-    // 0->F, 1->C (see AIRJET_PROFILE.tempUnitValues); fall back to the common
-    // 1->F convention if a profile doesn't declare a mapping.
-    const uv = this.profile.tempUnitValues;
-    const unit = uv
-      ? Number(unitRaw) === uv.C
-        ? 'C'
-        : 'F'
-      : unitRaw === 1 || unitRaw === '1' || unitRaw === 'F'
-        ? 'F'
-        : 'C';
-    // On Airjet_V01 the heat/filter datapoints are multi-state enums (0 = off,
-    // e.g. 2 = running, 3 = actively heating), not 0/1 booleans. Treat any
-    // non-zero state as "on"; this is also correct for the strict 0/1 fields.
-    const isOn = (v) => v === true || Number(v) > 0;
-
-    // Water temperature: the headline Tnow. We briefly used the word2 register
-    // ("inlet") instead, but live data falsified that decode: word2 kept
-    // climbing to 44.6 °C (≈112 °F) AFTER the element shut off at a 104 °F
-    // target, and the word7−word2 "ΔT" went negative — impossible for water
-    // drawn from the tub, so word2 is NOT a reliable bulk-water reading (it
-    // behaves more like an internal/enclosure temperature that lags runtime).
-    // Tnow overshoots ~2 °F right after heater cutoff, but it is bounded and
-    // recovers; word2's failure mode misleads the controller much worse.
-    const panelTemp = numOrNull(attr[a.currentTemp]);
-    const currentTemp = panelTemp;
-    const tempSource = 'panel';
-
+    // Normalisation (unit inversion, on/off enums, Tnow water temp, faults) is
+    // shared with LocalPumpClient via normalizeStatus(); we add binding meta.
     return {
       deviceId: dev.did,
       name: dev.dev_alias || dev.product_name || 'Hot tub',
       online: !!dev.is_online,
-      power: isOn(attr[a.power]),
-      heat: isOn(attr[a.heat]),
-      filter: isOn(attr[a.filter]),
-      bubbles: isOn(attr[a.bubbles]),
-      locked: isOn(attr[a.locked]),
-      currentTemp,
-      panelTemp,
-      tempSource,
-      targetTemp: numOrNull(attr[a.targetTemp]),
-      unit,
-      faults: detectFaults(attr),
-      raw: attr,
+      ...normalizeStatus(attr, this.profile),
     };
   }
 
