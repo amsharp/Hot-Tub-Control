@@ -44,6 +44,10 @@ export class RawLog {
       T: r.Tnow ?? null,
       word: nums(r, 'word', 8),
       opt: nums(r, 'option', 8),
+      // bit2..bit7 flags — undecoded; one may be the live flow-paddle state,
+      // which would give a real-time flow-OK bit (and possible pre-E02
+      // flutter). Captured across states to decode against events.
+      bit: [r.bit2 ?? null, r.bit3 ?? null, r.bit4 ?? null, r.bit5 ?? null, r.bit6 ?? null, r.bit7 ?? null],
     };
     const arr = this.store.data.samples;
     arr.push(sample);

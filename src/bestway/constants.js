@@ -42,10 +42,16 @@ export const AIRJET_PROFILE = {
   //                 with plausible values.
   //   word7       = the water temperature sensor in °C; Tnow is its rounded °F
   //                 twin (Tnow = round(word7*9/5+32) matched every sample).
+  //   word5       = heater-session runtime counter (minutes; 0 while the
+  //                 heater subsystem is off — diverges from word2 then).
+  //   heat enum   = 0 off, 5 prime/flow-check, 6 warmup, 3 element firing,
+  //                 4 target reached (element off), 2 on/idle.
   //   No register behaves as a downstream/outlet temperature: with the return
   //   valve heavily throttled and the element firing, all temps stayed pinned
   //   to incoming-water values until the E02 paddle dropped (binary, hard
   //   latch, ~zero warning). There is NO analog flow signal on this hardware.
+  //   bit2..bit7 flags remain undecoded (captured by the rawlog; one may be
+  //   the live flow-paddle state).
   attrs: {
     currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
     targetTemp: 'Tset', // target temperature (integer, °F on V01)
