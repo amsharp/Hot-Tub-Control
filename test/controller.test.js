@@ -41,9 +41,16 @@ const OFF = { online: true, power: false, heat: false, filter: false };
 const PEAK = { nowMs: 0, min: 17 * 60, day: 1 }; // 5 PM
 const PREHEAT = { nowMs: 0, min: 14 * 60, day: 1 }; // 2 PM, past 1:30 start
 
+// Seed the controller with one normal pre-peak cycle (tub heating at 3:58 PM,
+// plan agrees) so tests exercise steady-state behaviour, not the boot grace.
+async function warm(ctl) {
+  await ctl.onCycle(RUNNING, 100, true, { nowMs: 0, min: 15 * 60 + 58, day: 1 });
+}
+
 test('failed OFF command is retried, NOT treated as a manual override', async () => {
   const client = fakeClient({ failing: true });
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  await warm(ctl);
 
   // Peak, tub running, command fails — cycle 1..3 keep retrying.
   for (let i = 1; i <= 3; i++) {
@@ -68,6 +75,9 @@ test('command give-up notifies once and does not spam', async () => {
       notices += 1;
     },
   });
+  client.failing = false;
+  await warm(ctl);
+  client.failing = true;
   for (let i = 1; i <= 6; i++) {
     await ctl.onCycle(RUNNING, 100, true, { ...PEAK, nowMs: i * 120_000 });
   }
@@ -77,6 +87,7 @@ test('command give-up notifies once and does not spam', async () => {
 test('a CONFIRMED off later contradicted IS a manual override', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  await warm(ctl);
 
   await ctl.onCycle(RUNNING, 100, true, { ...PEAK, nowMs: 0 }); // issues off
   await ctl.onCycle(OFF, 100, true, { ...PEAK, nowMs: 120_000 }); // confirms
@@ -110,6 +121,7 @@ test('device offline: no commands are sent and nothing is inferred', async () =>
 test('FIRST app press during peak registers as an override (transition detection)', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  await warm(ctl);
   // 4 PM: controller kills everything for peak, confirmed next cycle.
   await ctl.onCycle(RUNNING, 104, true, { ...PEAK, nowMs: 0, min: 16 * 60 });
   await ctl.onCycle(OFF, 104, true, { ...PEAK, nowMs: 120_000, min: 16 * 60 + 2 });
@@ -135,6 +147,7 @@ test('override state survives a restart via the injected store', async () => {
   const store = { data: {}, save() {} };
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104, store });
+  await warm(ctl);
   await ctl.onCycle(RUNNING, 104, true, { ...PEAK, nowMs: 0, min: 16 * 60 });
   await ctl.onCycle(OFF, 104, true, { ...PEAK, nowMs: 120_000, min: 16 * 60 + 2 });
   await ctl.onCycle(RUNNING, 102, true, { ...PEAK, nowMs: 240_000, min: 16 * 60 + 4 }); // user override
@@ -148,9 +161,19 @@ test('override state survives a restart via the injected store', async () => {
   assert.equal(client2.calls.length, 0, 'does not fight the user after restart');
 });
 
+test('boot grace: fresh state + pump running during peak -> assume manual use', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  // First-ever cycle (empty store) lands mid-peak with the tub running.
+  const plan = await ctl.onCycle(RUNNING, 102, true, { ...PEAK, nowMs: 1_000_000 });
+  assert.equal(plan.overridden, true, 'stands down instead of killing a soak');
+  assert.equal(client.calls.length, 0);
+});
+
 test('machineAction() prevents watchdog recovery from reading as an override', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  await warm(ctl);
   await ctl.onCycle(RUNNING, 100, true, { ...PEAK, nowMs: 0 }); // off issued
   await ctl.onCycle(OFF, 100, true, { ...PEAK, nowMs: 120_000 }); // confirmed
   ctl.machineAction(); // watchdog restarted circulation to clear a fault

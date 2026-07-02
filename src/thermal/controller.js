@@ -87,6 +87,24 @@ export class SmartHeatController {
     const p = this.planner.plan(tempF, min, day, nowMs);
     const running = !!(status.power || status.heat || status.filter);
 
+    // Device offline: the reported state is stale — infer nothing from it and
+    // send nothing at it. lastRunning is deliberately NOT updated (a stale
+    // snapshot must not seed transition detection either).
+    if (status.online === false) {
+      this.log.warn('SmartHeat: device offline — skipping control cycle.');
+      const overridden = nowMs < this.overrideUntil;
+      this.lastPlan = {
+        ...p,
+        currentTemp: tempF,
+        tempReliable,
+        nowMin: min,
+        overridden,
+        reason: overridden ? 'override' : p.reason,
+        at: nowMs,
+      };
+      return this.lastPlan;
+    }
+
     // Reconcile any outstanding command before drawing conclusions.
     let overrideDetected = false;
     if (this.cmd) {
@@ -111,6 +129,18 @@ export class SmartHeatController {
       if (!explainedByUs && wouldFight) overrideDetected = true;
     }
 
+    // Boot grace: first-ever cycle (no persisted state) finding the pump
+    // RUNNING during peak. The controller can't have left it that way — its
+    // peak policy is all-off — so someone wanted it on. Stand down rather than
+    // kill a soak seconds after a restart. (A mid-peak restart with the tub
+    // legitimately off doesn't hit this: running would be false.)
+    // (lastPlan === null distinguishes a true fresh boot from machineAction(),
+    // which also clears lastRunning mid-run — recovery must re-assert the plan.)
+    if (!overrideDetected && this.lastPlan === null && this.lastRunning == null && this.overrideUntil === 0 && running && p.heat === false) {
+      overrideDetected = true;
+      this.log.info('SmartHeat: found pump running during peak on first cycle — assuming manual use.');
+    }
+
     if (overrideDetected) {
       const endMin = p.inPeak ? this.planner.peakEndMin(min) : p.targetMin;
       const untilMs = Math.max(2, (endMin ?? min) - min) * 60_000;
@@ -130,13 +160,6 @@ export class SmartHeatController {
       at: nowMs,
     };
     if (overridden) return this._finish(running);
-
-    // Device offline: commands would silently no-op and the reported state is
-    // stale — skip the cycle rather than act (or infer) from fiction.
-    if (status.online === false) {
-      this.log.warn('SmartHeat: device offline — skipping control cycle.');
-      return this._finish(running);
-    }
 
     // Desired action this cycle (null = leave as-is).
     const want =
