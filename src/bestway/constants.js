@@ -50,8 +50,12 @@ export const AIRJET_PROFILE = {
   //   valve heavily throttled and the element firing, all temps stayed pinned
   //   to incoming-water values until the E02 paddle dropped (binary, hard
   //   latch, ~zero warning). There is NO analog flow signal on this hardware.
-  //   bit2..bit7 flags remain undecoded (captured by the rawlog; one may be
-  //   the live flow-paddle state).
+  //   bit2..bit7: live-tested 2026-07-03 — NOT a flow-paddle bit. All six stay
+  //   0 with the pump circulating (filter-only, water demonstrably flowing) and
+  //   through heater prime(5)/warmup(6); bit2 rises ~3.5 min after heater
+  //   enable (heater-subsystem-active flag), bit6/bit7 accompany full firing
+  //   (heat=3, element/full-fire stage flags). No paddle state is exposed.
+  //   Post-E02 sessions show a much longer warmup (heat=6 for 12+ min vs ~4).
   attrs: {
     currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
     targetTemp: 'Tset', // target temperature (integer, °F on V01)
