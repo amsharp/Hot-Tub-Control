@@ -290,6 +290,37 @@ export class BestwayClient {
     return this.control({ [this.profile.attrs.targetTemp]: clamped }).then(() => clamped);
   }
 
+  // --- Cloud-side scheduler (Gizwits executes these even if we are down) -----
+
+  /** List cloud scheduler entries for this account. */
+  listSchedulers() {
+    return this._request('GET', '/app/scheduler?limit=20&skip=0');
+  }
+
+  /**
+   * Create a cloud scheduler entry. `timeUtc` is "HH:MM" in UTC (Gizwits
+   * executes schedulers on UTC wall time). Note the validator is stricter than
+   * the control endpoint: bool datapoints (e.g. power) must be true/false.
+   */
+  async createScheduler({ timeUtc, attrs, remark }) {
+    const did = await this.deviceId();
+    const dev = this._cachedDevice || (await this.resolveDevice());
+    return this._request('POST', '/app/scheduler', {
+      body: {
+        time: timeUtc,
+        repeat: 'mon,tue,wed,thu,fri,sat,sun',
+        task: [{ did, product_key: dev.product_key, attrs }],
+        retry_count: 3,
+        retry_task: 'all',
+        remark,
+      },
+    });
+  }
+
+  deleteScheduler(id) {
+    return this._request('DELETE', `/app/scheduler/${id}`);
+  }
+
   /** Full shutdown: power, heater, filter/circulation, and bubbles all off. */
   setAllOff() {
     const a = this.profile.attrs;

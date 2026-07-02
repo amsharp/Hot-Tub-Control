@@ -19,6 +19,7 @@ import { notify } from './notify/notifier.js';
 import { JsonStore } from './store.js';
 import { RawLog } from './rawlog.js';
 import { PumpHealth } from './pumphealth.js';
+import { ensureCloudFailsafe, utcHHMMForLocalMin } from './failsafe.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -283,6 +284,21 @@ async function main() {
         ).catch(() => {});
       }
     }, 5 * 60_000).unref?.();
+  }
+
+  // Cloud failsafe: keep a daily all-off task in the Gizwits scheduler at the
+  // start of peak (+2 min), so peak shutoff happens even if THIS service is
+  // dead. Re-synced daily because Gizwits schedulers run on UTC (DST moves the
+  // local->UTC mapping twice a year).
+  if (hasBestwayCreds && config.smartHeat.enabled && config.smartHeat.peaks.length) {
+    const syncFailsafe = () =>
+      ensureCloudFailsafe({
+        client,
+        timeUtc: utcHHMMForLocalMin(config.smartHeat.peaks[0].start + 2),
+        log,
+      });
+    syncFailsafe();
+    setInterval(syncFailsafe, 12 * 3_600_000).unref?.();
   }
 
   // Everything below talks to the pump, so it only runs once credentials exist.
