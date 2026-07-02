@@ -14,6 +14,8 @@ import { SmartHeatPlanner } from './thermal/planner.js';
 import { EnergyMeter } from './energy.js';
 import { WeatherProvider } from './weather.js';
 import { TouSchedule } from './rates.js';
+import { SmartHeatController } from './thermal/controller.js';
+import { notify } from './notify/notifier.js';
 import { RawLog } from './rawlog.js';
 import { FlowModel } from './flow.js';
 import { FilterHealth } from './filterhealth.js';
@@ -93,9 +95,19 @@ async function main() {
     peaks: config.smartHeat.peaks,
     safetyMin: config.smartHeat.safetyMin,
   });
-  let lastPlan = null;
-  let smartLastAction = null; // 'on' | 'off' | null — the last command WE issued
-  let overrideUntil = 0; // ms; while now < this, defer to a manual override
+  // Cloud-path liveness: stamped on every successful status read; a separate
+  // monitor alerts (once per outage) when reads have been failing for a while.
+  const pollHealth = { okAt: null, notified: false };
+
+  // Hardened control loop: confirm-before-override, bounded command retries,
+  // offline-skip. See src/thermal/controller.js.
+  const controller = new SmartHeatController({
+    client,
+    planner,
+    targetF: config.smartHeat.targetF,
+    notify: (title, message) => notify(title, message, { level: 'alert' }),
+    log,
+  });
 
   function localNow() {
     const d = new Date(); // container TZ (set TZ=America/Los_Angeles)
@@ -105,67 +117,27 @@ async function main() {
     };
   }
 
-  async function runSmartHeat(status, tempF, tempReliable = true) {
-    const now = Date.now();
-    const { min, day } = localNow();
-    const p = planner.plan(tempF, min, day, now);
-    const running = !!(status.power || status.heat || status.filter);
-
-    // Detect a manual override (SaluSpa app / Google Home / HUD) that contradicts
-    // our last command, and stand down until the end of the current window so we
-    // don't fight the user.
-    let overrideDetected = false;
-    if (p.heat === false && running && smartLastAction === 'off') {
-      overrideDetected = true; // user turned it on during peak
-    } else if (p.heat === true && !status.heat && smartLastAction === 'on') {
-      overrideDetected = true; // user turned it off during pre-heat
-    }
-    if (overrideDetected) {
-      const endMin = p.inPeak ? planner.peakEndMin(min) : p.targetMin;
-      const untilMs = Math.max(2, (endMin ?? min) - min) * 60_000;
-      overrideUntil = now + untilMs;
-      log.info(`SmartHeat: manual override detected (${p.reason}) — standing down`);
-    }
-    const overridden = now < overrideUntil;
-
-    lastPlan = {
-      ...p,
-      currentTemp: tempF,
-      tempReliable,
-      nowMin: min,
-      overridden,
-      reason: overridden ? 'override' : p.reason,
-      at: now,
-    };
-
-    if (overridden) return; // respect the user
-
-    if (p.heat === true && !status.heat) {
-      log.info(
-        `SmartHeat -> ON (${p.reason}); ~${Number.isFinite(p.needHours) ? p.needHours.toFixed(1) + 'h' : 'max'} to reach ${p.targetF}F`,
-      );
-      await client.setTargetTemperature(config.smartHeat.targetF, 'F');
-      await client.setHeating(true);
-      smartLastAction = 'on';
-    } else if (p.heat === false && running) {
-      // Peak: kill everything (heater AND pump/circulation).
-      log.info(`SmartHeat -> ALL OFF (${p.reason})`);
-      await client.setAllOff();
-      smartLastAction = 'off';
-    }
-  }
-
   // Called on every status read: enforce unit, log history, learn the heat
   // model, and run the smart pre-heat controller.
   async function onStatus(status) {
     await enforceUnit(status);
     const now = Date.now();
-    const tempF =
+    pollHealth.okAt = now; // a status made it through — the cloud path works
+    pollHealth.notified = false;
+    let tempF =
       status.currentTemp == null
         ? null
         : status.unit === 'C'
           ? Math.round((status.currentTemp * 9) / 5 + 32)
           : status.currentTemp;
+
+    // Plausibility guard: a glitched sensor reading (0, 999, ...) must not
+    // poison the model, the chart, or the planner. Treat it as "no reading" —
+    // the model then projects from its last reliable temperature.
+    if (tempF != null && (tempF < 40 || tempF > 115)) {
+      log.warn(`Implausible temperature reading ${tempF}F — ignoring this cycle.`);
+      tempF = null;
+    }
 
     // The temp sensor only reads true bulk temp while the pump circulates AND has
     // settled (a few minutes). Determine reliability ONCE, from the model, and let
@@ -209,7 +181,8 @@ async function main() {
 
     if (tempF != null && config.smartHeat.enabled) {
       try {
-        await runSmartHeat(status, est.tempF, est.reliable);
+        const { min, day } = localNow();
+        await controller.onCycle(status, est.tempF, est.reliable, { nowMs: now, min, day });
       } catch (err) {
         log.warn('SmartHeat failed:', err.message);
       }
@@ -218,7 +191,8 @@ async function main() {
     // Energy accounting last, so peak/override context reflects this cycle.
     try {
       const { min, day } = localNow();
-      const ctx = { inPeak: planner.inPeak(min), overridden: !!(lastPlan && lastPlan.overridden) };
+      const lp = controller.lastPlan;
+      const ctx = { inPeak: planner.inPeak(min), overridden: !!(lp && lp.overridden) };
       meter.sample(status, Date.now(), day, Math.floor(day / 100), ctx);
     } catch (err) {
       log.warn('Energy sample failed:', err.message);
@@ -232,12 +206,15 @@ async function main() {
       targetF: config.smartHeat.targetF,
       targetMin: config.smartHeat.targetMin,
       peaks: config.smartHeat.peaks,
-      plan: lastPlan,
+      plan: controller.lastPlan,
       model: { heat: model.heatParams(), cool: model.coolParams(now), ...model.stats() },
       weather: {
         enabled: weather.enabled,
         ambientNowF: weather.enabled ? weather.ambientAt(now) : null,
         forecastPoints: weather.series.length,
+      },
+      health: {
+        lastPollAgeSec: pollHealth.okAt ? Math.round((now - pollHealth.okAt) / 1000) : null,
       },
     };
   };
@@ -264,7 +241,13 @@ async function main() {
     intervalMs: config.watchdog.intervalMs,
     maxAttempts: config.watchdog.maxAttempts,
     cooldownMs: config.watchdog.cooldownMs,
-    onRecovered: (status) => reportState(status),
+    onRecovered: (status) => {
+      // The watchdog just changed pump state itself (restart circulation) —
+      // machine action, not a user override; reset the controller's state
+      // machine so it re-asserts the plan instead of standing down.
+      controller.machineAction();
+      return reportState(status);
+    },
     onStatus,
   });
 
@@ -281,6 +264,26 @@ async function main() {
       () => weather.refresh().catch((err) => log.warn('Weather refresh failed:', err.message)),
       config.weather.refreshMin * 60_000,
     ).unref?.();
+  }
+
+  // Outage monitor: if no status read has succeeded for 30 min, log an error
+  // and notify once. Control resumes automatically on the next good read.
+  if (hasBestwayCreds) {
+    const STALE_MS = 30 * 60_000;
+    setInterval(() => {
+      if (!pollHealth.okAt || pollHealth.notified) return;
+      const age = Date.now() - pollHealth.okAt;
+      if (age > STALE_MS) {
+        pollHealth.notified = true;
+        log.error(`No successful pump status for ${Math.round(age / 60000)} min — Bestway cloud unreachable?`);
+        notify(
+          'Hot tub control degraded',
+          `Haven't been able to read the pump for ${Math.round(age / 60000)} minutes. ` +
+            'Scheduling is paused until the cloud connection recovers (it retries every cycle).',
+          { level: 'alert' },
+        ).catch(() => {});
+      }
+    }, 5 * 60_000).unref?.();
   }
 
   // Everything below talks to the pump, so it only runs once credentials exist.
@@ -319,6 +322,19 @@ async function main() {
     }
   });
 }
+
+// Last-resort safety net: log with full context, then exit non-zero so the
+// platform (Railway restartPolicy ON_FAILURE) restarts us with clean state.
+// All persistent state (schedules, model, energy, history) lives in JsonStores
+// on the volume, so a restart is cheap and safe.
+process.on('uncaughtException', (err) => {
+  log.error('Uncaught exception:', err.stack || err.message);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled rejection:', (reason && reason.stack) || String(reason));
+  process.exit(1);
+});
 
 main().catch((err) => {
   log.error('Fatal:', err.stack || err.message);

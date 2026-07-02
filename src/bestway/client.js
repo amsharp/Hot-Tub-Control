@@ -32,13 +32,14 @@ export class BestwayClient {
    * @param {typeof fetch} [opts.fetchImpl] injectable fetch (defaults to global)
    * @param {object} [opts.profile] device attribute profile (defaults to Airjet)
    */
-  constructor({ username, password, region = 'eu', deviceId = '', fetchImpl, profile } = {}) {
+  constructor({ username, password, region = 'eu', deviceId = '', fetchImpl, profile, requestTimeoutMs = 15_000 } = {}) {
     this.username = username;
     this.password = password;
     this.apiRoot = apiRootForRegion(region);
     this.pinnedDeviceId = deviceId;
     this.fetch = fetchImpl || globalThis.fetch;
     this.profile = profile || AIRJET_PROFILE;
+    this.requestTimeoutMs = requestTimeoutMs;
 
     this.token = null;
     this.uid = null;
@@ -55,18 +56,35 @@ export class BestwayClient {
     };
   }
 
-  async _request(method, path, { body, auth = true } = {}) {
+  async _request(method, path, { body, auth = true, _retried = false } = {}) {
     if (auth) await this.ensureToken();
     const headers = this._headers(
       auth && this.token ? { 'X-Gizwits-User-token': this.token } : {},
     );
     const url = `${this.apiRoot}${path}`;
     log.debug(`${method} ${url}`);
-    const res = await this.fetch(url, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+
+    // Bound every call: a hung socket must not stall a control cycle forever.
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), this.requestTimeoutMs) : null;
+    let res;
+    try {
+      res = await this.fetch(url, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+    } catch (err) {
+      const timedOut = err && (err.name === 'AbortError' || err.name === 'TimeoutError');
+      throw new BestwayApiError(
+        `Bestway API ${method} ${path} ${timedOut ? `timed out after ${this.requestTimeoutMs}ms` : `failed: ${err.message}`}`,
+        0,
+      );
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
     const text = await res.text();
     let json;
     try {
@@ -75,6 +93,13 @@ export class BestwayClient {
       json = { raw: text };
     }
     if (!res.ok) {
+      // Token invalidated server-side (Gizwits can revoke before expire_at,
+      // e.g. when another client logs in): re-login once and retry the call.
+      if (auth && !_retried && (res.status === 401 || res.status === 403)) {
+        log.warn(`Bestway API ${res.status} on ${path} — re-authenticating and retrying once.`);
+        this.token = null;
+        return this._request(method, path, { body, auth, _retried: true });
+      }
       throw new BestwayApiError(
         `Bestway API ${method} ${path} failed: ${res.status} ${json.error_message || text}`,
         res.status,

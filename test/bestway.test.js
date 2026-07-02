@@ -78,6 +78,27 @@ test('getStatus reads Celsius mode (Tunit=1)', async () => {
   assert.equal(status.targetTemp, 40);
 });
 
+test('re-authenticates once and retries when the token is rejected mid-flight', async () => {
+  let logins = 0;
+  let bindingsCalls = 0;
+  const routes = {
+    'POST /app/login': () => {
+      logins += 1;
+      return { json: { token: `tok${logins}`, uid: 'u', expire_at: Math.floor(Date.now() / 1000) + 3600 } };
+    },
+    'GET /app/bindings': () => {
+      bindingsCalls += 1;
+      // First call: token rejected (revoked server-side). Second: fine.
+      if (bindingsCalls === 1) return { ok: false, status: 401, json: { error_message: 'token expired' } };
+      return { json: { devices: [DEVICE] } };
+    },
+  };
+  const client = new BestwayClient({ username: 'a', password: 'b', fetchImpl: fakeFetch(routes) });
+  const devices = await client.listDevices();
+  assert.equal(devices.length, 1, 'request succeeded after re-auth');
+  assert.equal(logins, 2, 'logged in again after the 401');
+});
+
 test('getStatus uses Tnow even when word2 is present (falsified "inlet" decode)', async () => {
   // Live falsification: word2 climbed to 44.6 °C (≈112 °F) AFTER element-off at
   // a 104 °F target — it is not a bulk-water reading and must never be used as
