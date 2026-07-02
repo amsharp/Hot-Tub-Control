@@ -22,23 +22,47 @@ export class SmartHeatController {
    * @param {object} [opts.log] logger (defaults to console-compatible no-op)
    * @param {number} [opts.maxRetries] command re-issues before giving up (default 3)
    */
-  constructor({ client, planner, targetF, notify, log, maxRetries = 3 } = {}) {
+  constructor({ client, planner, targetF, notify, log, maxRetries = 3, store } = {}) {
     this.client = client;
     this.planner = planner;
     this.targetF = targetF;
     this.notify = notify || (async () => {});
     this.log = log || { info() {}, warn() {} };
     this.maxRetries = maxRetries;
+    // Optional persistence (JsonStore-shaped): survives redeploys so an active
+    // override or in-flight command isn't forgotten by a restart mid-evening.
+    this.store = store || { data: {}, save() {} };
+    const d = this.store.data;
 
     this.lastPlan = null;
-    this.overrideUntil = 0; // ms epoch; while now < this, defer to the user
+    this.overrideUntil = d.overrideUntil || 0; // ms epoch; defer to the user until then
     // Command state machine: null | { action:'on'|'off', attempts, confirmed }
-    this.cmd = null;
+    this.cmd = d.cmd || null;
+    // Pump running-state at the previous poll (null = unknown). A running-state
+    // transition we didn't command is a human acting — the FIRST app press
+    // registers as an override, not just a contradiction of our own command.
+    this.lastRunning = 'lastRunning' in d ? d.lastRunning : null;
+  }
+
+  _persist() {
+    this.store.data.overrideUntil = this.overrideUntil;
+    this.store.data.cmd = this.cmd;
+    this.store.data.lastRunning = this.lastRunning;
+    this.store.save();
   }
 
   /** Reset after machine-initiated state changes (e.g. watchdog recovery). */
   machineAction() {
     this.cmd = null;
+    this.lastRunning = null; // next transition is machine-made — don't read it as human
+    this._persist();
+  }
+
+  /** Single exit for onCycle: remember the observed state and persist. */
+  _finish(running) {
+    this.lastRunning = running;
+    this._persist();
+    return this.lastPlan;
   }
 
   /** True when the pump state matches what `action` should have produced. */
@@ -76,6 +100,17 @@ export class SmartHeatController {
       // do NOT treat it as an override.
     }
 
+    // Transition-based detection: the pump changed running-state between polls
+    // and no command of ours explains it -> a human did it. This registers the
+    // FIRST app press as an override (the confirmed-contradiction path above
+    // otherwise needs the user to fight us twice). Only relevant when the plan
+    // would fight the change; agreeing transitions are just absorbed.
+    if (!overrideDetected && this.lastRunning != null && running !== this.lastRunning) {
+      const explainedByUs = this.cmd && this.cmd.action === (running ? 'on' : 'off');
+      const wouldFight = running ? p.heat === false : p.heat === true;
+      if (!explainedByUs && wouldFight) overrideDetected = true;
+    }
+
     if (overrideDetected) {
       const endMin = p.inPeak ? this.planner.peakEndMin(min) : p.targetMin;
       const untilMs = Math.max(2, (endMin ?? min) - min) * 60_000;
@@ -94,13 +129,13 @@ export class SmartHeatController {
       reason: overridden ? 'override' : p.reason,
       at: nowMs,
     };
-    if (overridden) return this.lastPlan;
+    if (overridden) return this._finish(running);
 
     // Device offline: commands would silently no-op and the reported state is
     // stale — skip the cycle rather than act (or infer) from fiction.
     if (status.online === false) {
       this.log.warn('SmartHeat: device offline — skipping control cycle.');
-      return this.lastPlan;
+      return this._finish(running);
     }
 
     // Desired action this cycle (null = leave as-is).
@@ -110,7 +145,7 @@ export class SmartHeatController {
     if (!want) {
       // State agrees with the plan. Keep a confirmed command in memory — it is
       // exactly what lets a later contradiction register as a user override.
-      return this.lastPlan;
+      return this._finish(running);
     }
 
     if (!this.cmd || this.cmd.action !== want) this.cmd = { action: want, attempts: 0, confirmed: false };
@@ -128,7 +163,7 @@ export class SmartHeatController {
       );
     }
     // Fast retries up to maxRetries, then every 5th cycle (~10 min at 2-min polls).
-    if (a > this.maxRetries && (a - this.maxRetries - 1) % 5 !== 0) return this.lastPlan;
+    if (a > this.maxRetries && (a - this.maxRetries - 1) % 5 !== 0) return this._finish(running);
 
     this.log.info(
       `SmartHeat -> ${want.toUpperCase()} (${p.reason})` + (a > 1 ? ` [attempt ${a}]` : ''),
@@ -139,6 +174,6 @@ export class SmartHeatController {
       // Leave this.cmd unconfirmed; the next cycle retries on the cadence above.
       this.log.warn(`SmartHeat: '${want}' command failed: ${err.message}`);
     }
-    return this.lastPlan;
+    return this._finish(running);
   }
 }

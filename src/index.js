@@ -16,6 +16,7 @@ import { WeatherProvider } from './weather.js';
 import { TouSchedule } from './rates.js';
 import { SmartHeatController } from './thermal/controller.js';
 import { notify } from './notify/notifier.js';
+import { JsonStore } from './store.js';
 import { RawLog } from './rawlog.js';
 import { FlowModel } from './flow.js';
 import { FilterHealth } from './filterhealth.js';
@@ -107,6 +108,9 @@ async function main() {
     targetF: config.smartHeat.targetF,
     notify: (title, message) => notify(title, message, { level: 'alert' }),
     log,
+    // Persist override/command state so a redeploy mid-evening doesn't forget
+    // that the user overrode us (and start fighting them again).
+    store: new JsonStore('controller.json', {}),
   });
 
   function localNow() {

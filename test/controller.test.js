@@ -107,6 +107,47 @@ test('device offline: no commands are sent and nothing is inferred', async () =>
   assert.equal(plan.overridden, false);
 });
 
+test('FIRST app press during peak registers as an override (transition detection)', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  // 4 PM: controller kills everything for peak, confirmed next cycle.
+  await ctl.onCycle(RUNNING, 104, true, { ...PEAK, nowMs: 0, min: 16 * 60 });
+  await ctl.onCycle(OFF, 104, true, { ...PEAK, nowMs: 120_000, min: 16 * 60 + 2 });
+  client.calls.length = 0;
+  // 6 PM: the user turns it on in the Bestway app — ONE press.
+  const plan = await ctl.onCycle(RUNNING, 102, true, { ...PEAK, nowMs: 2 * 3_600_000, min: 18 * 60 });
+  assert.equal(plan.overridden, true, 'first press respected');
+  assert.equal(client.calls.length, 0, 'nothing issued against the user');
+});
+
+test('our own ON taking effect is not misread as a user transition', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  // Pre-heat window: controller issues ON while the pump is off.
+  await ctl.onCycle(OFF, 100, true, { ...PREHEAT, nowMs: 0 });
+  assert.ok(client.calls.includes('on'));
+  // Next poll the pump is running — that's OUR command taking effect.
+  const plan = await ctl.onCycle(RUNNING, 100, true, { ...PREHEAT, nowMs: 120_000 });
+  assert.equal(plan.overridden, false, 'own command is not an override');
+});
+
+test('override state survives a restart via the injected store', async () => {
+  const store = { data: {}, save() {} };
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104, store });
+  await ctl.onCycle(RUNNING, 104, true, { ...PEAK, nowMs: 0, min: 16 * 60 });
+  await ctl.onCycle(OFF, 104, true, { ...PEAK, nowMs: 120_000, min: 16 * 60 + 2 });
+  await ctl.onCycle(RUNNING, 102, true, { ...PEAK, nowMs: 240_000, min: 16 * 60 + 4 }); // user override
+  assert.ok(store.data.overrideUntil > 240_000, 'override persisted');
+
+  // "Redeploy": a fresh controller from the same store must keep standing down.
+  const client2 = fakeClient();
+  const ctl2 = new SmartHeatController({ client: client2, planner: planner(), targetF: 104, store });
+  const plan = await ctl2.onCycle(RUNNING, 102, true, { ...PEAK, nowMs: 360_000, min: 16 * 60 + 6 });
+  assert.equal(plan.overridden, true, 'override remembered across restart');
+  assert.equal(client2.calls.length, 0, 'does not fight the user after restart');
+});
+
 test('machineAction() prevents watchdog recovery from reading as an override', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
