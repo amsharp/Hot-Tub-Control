@@ -88,16 +88,15 @@ cloud has no official public API and may change. Constants live in
 `temp_set_unit` (0/C, 1/F), `power`, `heat_power`, `filter_power`, `wave_power`
 (bubbles), `locked`. On/off values are 1/0. Temp clamps: C 20–40, F 68–104.
 
-**Undocumented registers (original reverse-engineering, partially decoded):**
-`word2`/`word5` ÷10 → °C and `word7` (°C) look like an inlet/outlet pair WHILE
-the element fires (word2 ≈ 3 °C below water, word7 above; ΔT collapses to ~0.2 °C
-at element-off) — the basis of the flow estimate (`src/flow.js`, ṁ = P/(c·ΔT),
-P ≈ 1320 W nameplate, computed only at heat=3). **BUT the "word2 = bulk inlet"
-reading was falsified live**: after element-off it kept climbing to 44.6 °C
-(≈112 °F, tub at ~104 °F) with a negative "ΔT" — outside the firing state it
-behaves like an internal/enclosure temp. `currentTemp` MUST come from `Tnow`
-(which merely overshoots ~2 °F briefly after heater cutoff). The rawlog
-(`/api/raw`) keeps capturing all states to finish the decode.
+**Undocumented registers — DECODED (valve-throttle trial, 2026-07-02):**
+`word2`/`word5` = runtime counter in MINUTES since power-on (resets at power
+off; the earlier "inlet temp" and flow estimate built on it were wrong and are
+removed). `word7` = water temp in °C; `Tnow` is its rounded-°F twin. With the
+return valve heavily throttled and the element firing, no register moved until
+the E02 paddle dropped (binary trip, hard latch, ~zero warning): **this pump
+exposes NO analog flow signal.** Filter health = E02 event rate + settle-time
+trend (`src/pumphealth.js`). `currentTemp` comes from `Tnow` (brief ~2 °F
+overshoot after heater cutoff is its only quirk).
 `heat` enum: 0=off, 2=on/idle, **3=element firing** (the only state drawing
 heater watts), **4=target reached, element off** (E32=1 accompanies it).
 

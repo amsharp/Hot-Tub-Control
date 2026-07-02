@@ -63,13 +63,15 @@ if (!s) {
       : maintaining
         ? "MAINTAIN"
         : "IDLE";
-  // Filter health (24h flow average vs clean baseline) once it has enough data.
+  // Pump health warning: recurring E02 trips or lengthening settle times both
+  // mean the filter is loading up (the only real degradation signals this
+  // hardware provides — it has no analog flow sensor).
   let statusLine = stateTxt + "   ·   PUMP " + (pumpOn ? "ON" : "OFF");
-  const fh = s.filterHealth;
-  if (fh && fh.pct != null) statusLine += "   ·   FILTER " + fh.pct + "%";
+  const ph = s.pumpHealth;
+  if (ph && ph.warning) statusLine += "   ·   CHECK FILTER";
   const st = left.addText(statusLine);
   st.font = Font.semiboldSystemFont(10);
-  st.textColor = faulted ? RED : fh && fh.pct != null && fh.pct < 70 ? RED : firing ? AMBER : maintaining ? GREEN : SECOND;
+  st.textColor = faulted || (ph && ph.warning) ? RED : firing ? AMBER : maintaining ? GREEN : SECOND;
 
   top.addSpacer();
 
@@ -112,17 +114,15 @@ if (!s) {
 
   w.addSpacer(); // push footer to the bottom edge
 
-  // Live draw + estimated circulation flow on one line. Watts jump to ~1.3 kW
-  // while the element fires and fall to the ~40 W pump at "maintain". Flow (from
-  // the heater ΔT) is only measurable while firing; `shown` holds the last good
-  // reading while idle but drops to 0 when the pump is off (no circulation).
-  const powerParts = [];
-  if (energy && energy.watts != null) powerParts.push(Math.round(energy.watts) + " W");
-  if (s.flow && s.flow.shown != null) powerParts.push(s.flow.shown.toFixed(1) + " L/min");
-  if (powerParts.length) {
-    const pw = w.addText(powerParts.join("   ·   "));
+  // Live draw: ~1.3 kW while the element fires, dropping to the ~40 W pump at
+  // "maintain". (The L/min flow readout was removed — the valve-throttle trial
+  // proved the pump exposes no analog flow signal; the old number was derived
+  // from a register that turned out to be a runtime counter.)
+  if (energy && energy.watts != null) {
+    const wnow = Math.round(energy.watts);
+    const pw = w.addText(wnow + " W");
     pw.font = Font.semiboldSystemFont(10);
-    pw.textColor = energy && energy.watts >= 1000 ? AMBER : PRIMARY;
+    pw.textColor = wnow >= 1000 ? AMBER : PRIMARY;
   }
 
   let footText;

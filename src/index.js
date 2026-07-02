@@ -18,8 +18,7 @@ import { SmartHeatController } from './thermal/controller.js';
 import { notify } from './notify/notifier.js';
 import { JsonStore } from './store.js';
 import { RawLog } from './rawlog.js';
-import { FlowModel } from './flow.js';
-import { FilterHealth } from './filterhealth.js';
+import { PumpHealth } from './pumphealth.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -54,17 +53,10 @@ async function main() {
   // registers into a flow/filter-health proxy). Diagnostic only.
   const rawlog = new RawLog();
 
-  // Filter health: 24h moving average of the flow estimate vs its best-ever
-  // baseline. Ratio-based, so absolute flow-scale errors cancel.
-  const filterHealth = new FilterHealth();
-
-  // Flow-rate estimate from the heater energy balance (inlet/outlet ΔT + power).
-  const flowModel = new FlowModel({
-    heaterW: config.flow.heaterW,
-    inlet: { key: config.flow.inletKey, scale: config.flow.inletScale },
-    outlet: { key: config.flow.outletKey, scale: config.flow.outletScale },
-    minDeltaC: config.flow.minDeltaC,
-  });
+  // Filter/circulation health from the pump's only real signals: E02 event
+  // rate + morning settle time. (The valve-throttle trial proved there is no
+  // analog flow signal on this hardware — see src/pumphealth.js.)
+  const pumpHealth = new PumpHealth();
 
   // Software energy estimator, priced by the TOU-D-PRIME schedule when enabled
   // (falls back to the flat rate/ratePeak pair otherwise).
@@ -174,13 +166,16 @@ async function main() {
       log.warn('Raw log failed:', err.message);
     }
 
-    // Update the flow estimate's last-good reading from the 2-min stream, and
-    // feed reliable samples into the filter-health moving average.
+    // Track filter/circulation health (E02 transitions + settle times).
     try {
-      const f = flowModel.compute(status, now);
-      filterHealth.record(f, now);
+      pumpHealth.onStatus({
+        e02Active: (status.faults || []).some((f) => f.code === 'E02'),
+        tempF,
+        circulating: !!status.filter,
+        now,
+      });
     } catch (err) {
-      log.warn('Flow compute failed:', err.message);
+      log.warn('Pump health failed:', err.message);
     }
 
     if (tempF != null && config.smartHeat.enabled) {
@@ -255,7 +250,7 @@ async function main() {
     onStatus,
   });
 
-  const app = createServer({ client, scheduler, watchdog, history, rawlog, flowModel, filterHealth, getPlan, getEnergy });
+  const app = createServer({ client, scheduler, watchdog, history, rawlog, pumpHealth, getPlan, getEnergy });
 
   // Keep the outdoor forecast fresh (used as the cooling model's ambient). Runs
   // independently of the pump; a no-op when no location is configured.

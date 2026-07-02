@@ -166,19 +166,6 @@ export const config = {
     },
   },
 
-  // Flow-rate estimate from the heater energy balance: ṁ = P/(c·ΔT), using the
-  // inlet/outlet temps decoded from the pump's extra registers. Power should be
-  // the element's nameplate wattage; the register mapping is empirical (hence
-  // overridable) — inlet defaults to word2 (÷10 → °C), outlet to word7 (°C).
-  flow: {
-    heaterW: Number(process.env.FLOW_HEATER_W) || Number(process.env.ENERGY_HEATER_W) || 1320,
-    inletKey: process.env.FLOW_INLET_KEY || 'word2',
-    inletScale: Number(process.env.FLOW_INLET_SCALE) || 0.1,
-    outletKey: process.env.FLOW_OUTLET_KEY || 'word7',
-    outletScale: Number(process.env.FLOW_OUTLET_SCALE) || 1,
-    minDeltaC: Number(process.env.FLOW_MIN_DELTA_C) || 0.5,
-  },
-
   watchdog: {
     // Auto-clear transient low-flow (E02) faults by restarting circulation.
     autoClear: bool(process.env.AUTO_CLEAR_LOW_FLOW, true),

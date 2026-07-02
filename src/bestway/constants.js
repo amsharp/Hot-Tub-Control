@@ -35,14 +35,17 @@ export function apiRootForRegion(region) {
 export const AIRJET_PROFILE = {
   productName: 'Airjet_V01',
   tempUnitValues: { F: 0, C: 1 }, // raw Tunit value for each unit (this firmware)
-  // Undocumented registers (live observations, still being decoded via the
-  // rawlog): word2/word5 (÷10 → °C) read ~3 °C BELOW the water while the element
-  // fires and word7 (°C) reads above it, which fits an inlet/outlet pair — the
-  // basis of the ΔT flow estimate. BUT word2 kept climbing to 44.6 °C (≈112 °F)
-  // after element-off at a 104 °F target, with the "ΔT" going negative — so
-  // word2 is NOT a trustworthy bulk-water temperature outside the firing state
-  // (it behaves more like an internal/enclosure temp that lags runtime). Do NOT
-  // use it as currentTemp; Tnow remains the authoritative water reading.
+  // Undocumented registers — DECODED via the 2026-07-02 valve-throttle trial:
+  //   word2/word5 = runtime counter, MINUTES since power-on (resets to 0 at
+  //                 mains/app power-off; ticks 1/min). NOT a temperature — the
+  //                 earlier "inlet ÷10 °C" reading was this counter coinciding
+  //                 with plausible values.
+  //   word7       = the water temperature sensor in °C; Tnow is its rounded °F
+  //                 twin (Tnow = round(word7*9/5+32) matched every sample).
+  //   No register behaves as a downstream/outlet temperature: with the return
+  //   valve heavily throttled and the element firing, all temps stayed pinned
+  //   to incoming-water values until the E02 paddle dropped (binary, hard
+  //   latch, ~zero warning). There is NO analog flow signal on this hardware.
   attrs: {
     currentTemp: 'Tnow', // current water temperature (integer, °F on V01)
     targetTemp: 'Tset', // target temperature (integer, °F on V01)

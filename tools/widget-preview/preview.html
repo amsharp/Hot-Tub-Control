@@ -51,7 +51,7 @@ try {
   hdr.innerHTML =
     '<div class="left">' +
       '<div class="name" style="font-size:' + nameSz + 'px">CEDAR TUB</div>' +
-      '<div class="status" style="font-size:10px;margin-top:2px">MAINTAIN&nbsp;&nbsp;·&nbsp;&nbsp;PUMP ON&nbsp;&nbsp;·&nbsp;&nbsp;FILTER 100%</div>' +
+      '<div class="status" style="font-size:10px;margin-top:2px">MAINTAIN&nbsp;&nbsp;·&nbsp;&nbsp;PUMP ON&nbsp;&nbsp;·&nbsp;&nbsp;CHECK FILTER</div>' +
     '</div>' +
     '<div class="right">' +
       '<div class="big" style="font-size:' + bigSz + 'px">102°F</div>' +
@@ -92,7 +92,7 @@ try {
   var footWrap = document.createElement('div'); footWrap.style.marginTop = 'auto';
   var powerLine = document.createElement('div');
   powerLine.style.cssText = 'font-size:10px;font-weight:600;color:#fdd663';
-  powerLine.textContent = '1340 W   ·   4.7 L/min';
+  powerLine.textContent = '1340 W';
   var money = document.createElement('div'); money.className = 'foot'; money.style.cssText = 'font-size:9px;margin-top:1px';
   money.textContent = '13 kWh · $5.37 this month  ·  $1.24 override';
   footWrap.appendChild(powerLine); footWrap.appendChild(money);
