@@ -16,6 +16,13 @@ test('counts the heater only when the element is actively firing (heat=3)', () =
   assert.equal(m.wattsFor({ raw: { heat: 0 }, bubbles: true, filter: true }), 640); // blower + pump
 });
 
+test('idle/standby draw is a constant baseline added to every state', () => {
+  const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1320, pump: 60, blower: 780, idle: 5 } });
+  assert.equal(m.wattsFor({ raw: { heat: 0 }, filter: false }), 5); // fully off but plugged in
+  assert.equal(m.wattsFor({ raw: { heat: 2 }, filter: true }), 65); // maintain: idle + pump
+  assert.equal(m.wattsFor({ raw: { heat: 3 }, filter: true }), 1385); // firing: idle + heater + pump
+});
+
 test('accumulates kWh over sampled intervals', () => {
   const m = new EnergyMeter({ store: fakeStore(), watts: { heater: 1300, pump: 40, blower: 600 }, rate: 0.4 });
   m.sample({ raw: { heat: 3 }, filter: true }, 0, 20260701, 202607); // 1340W baseline

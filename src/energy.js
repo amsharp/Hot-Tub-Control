@@ -48,7 +48,11 @@ export class EnergyMeter {
   /** Instantaneous draw (W) from a status snapshot (uses the raw heat enum). */
   wattsFor(status) {
     const raw = status.raw || {};
-    let w = 0;
+    // Always-on standby: the WiFi module, MCU, display and 12V supply draw a few
+    // watts whenever the tub is plugged in — the ONLY draw during idle/coast
+    // hours, so it must not be zero. (Defaults to 0 when not configured, so
+    // tests that pass an explicit watts map are unaffected.)
+    let w = this.watts.idle || 0;
     // heat enum observed live: 0=off, 2=on/idle, 3=element firing, 4=target
     // reached (standby — element OFF: the ΔT across the heater collapses to ~0
     // in this state). Count the heater ONLY in state 3.

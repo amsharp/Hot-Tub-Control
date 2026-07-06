@@ -65,7 +65,12 @@ async function main() {
   const touSchedule =
     tou.enabled && tou.summerOn > 0 ? new TouSchedule(tou) : null;
   const meter = new EnergyMeter({
-    watts: { heater: config.energy.heaterW, pump: config.energy.pumpW, blower: config.energy.blowerW },
+    watts: {
+      heater: config.energy.heaterW,
+      pump: config.energy.pumpW,
+      blower: config.energy.blowerW,
+      idle: config.energy.idleW,
+    },
     rate: config.energy.rate,
     ratePeak: config.energy.ratePeak || config.energy.rate,
     rateFor: touSchedule ? (nowMs) => touSchedule.rateAt(new Date(nowMs)) : undefined,

@@ -148,10 +148,16 @@ export const config = {
   //     baseline, so it was the meaningful correction (was 40W ≈ half nameplate).
   //   Massage blower 6.5A -> ~780W. Mutually exclusive with the heater (11.3+6.5
   //     = 17.8A would exceed the 12A circuit), so it's never summed with it.
+  //   Idle/standby ~5W: WiFi module + MCU + display + 12V PSU quiescent draw,
+  //     always on while plugged in (no nameplate line for it — this is the least
+  //     certain of the four; a Kill-A-Watt on "everything off" would pin it). It
+  //     is the sole draw during idle/coast/overnight hours, so it matters for
+  //     the baseline even though it's small.
   energy: {
     heaterW: Number(process.env.ENERGY_HEATER_W) || 1320,
     pumpW: Number(process.env.ENERGY_PUMP_W) || 60,
     blowerW: Number(process.env.ENERGY_BLOWER_W) || 780,
+    idleW: Number(process.env.ENERGY_IDLE_W) || 5,
     rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh fallback (TOU disabled)
     ratePeak: Number(process.env.ELECTRICITY_RATE_PEAK) || 0, // $/kWh during peak (0 = same as rate)
     // SCE TOU-D-PRIME time-of-use pricing, bundled $/kWh as published on
