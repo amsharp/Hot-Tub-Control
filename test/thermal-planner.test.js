@@ -44,6 +44,21 @@ test('unreachable target (Infinity) heats as early as possible off-peak', () => 
   assert.equal(p.plan(80, 6 * 60, 1).heat, true); // 6 AM, off-peak, needs all day
 });
 
+test('cross-midnight pre-heat: an early-morning target heats the prior evening', () => {
+  // Target 6:00 AM (360), needs 5h -> lead window 5h+30 = 330 min, so start ~00:00.
+  const p = new SmartHeatPlanner({ model: fakeModel(5), targetF: 104, targetMin: 6 * 60, peaks: PEAK, safetyMin: 30 });
+  // 10:00 PM the prior evening (1320, past the 4-9 peak): before the lead window,
+  // idle (NOT wrongly 'after-target' the way the old nowMin>=targetMin logic did).
+  assert.equal(p.plan(95, 22 * 60, 1).heat, null);
+  // 00:40 (40): minsUntil = 320 <= 330 lead -> pre-heat, even though nowMin(40) >
+  // would-be startMin. This is the case the old nowMin>=targetMin logic broke.
+  const at = p.plan(95, 40, 2);
+  assert.equal(at.heat, true);
+  assert.equal(at.reason, 'preheat');
+  // 6:10 AM (370), just past target: stop.
+  assert.equal(p.plan(104, 370, 2).heat, null);
+});
+
 test('the latch resets on a new day', () => {
   const p = new SmartHeatPlanner({ model: fakeModel(2), targetMin: 16 * 60, peaks: PEAK, safetyMin: 30 });
   p.plan(100, 810, 1); // commit day 1

@@ -61,8 +61,10 @@ async function main() {
   const pumpHealth = new PumpHealth();
 
   // Detects the "firing but not gaining heat" failure (cover off / low water /
-  // restricted flow) — physical, so it can only warn, not fix.
-  const stall = new StallMonitor({ notify: (t, m) => notify(t, m, { level: 'alert' }), log });
+  // restricted flow) — physical, so it can only warn, not fix. Threshold is
+  // model-derived (see StallMonitor); `model` is created just below, so this is
+  // assigned after it. Placeholder ref filled in post-model.
+  let stall;
 
   // Software energy estimator, priced by the TOU-D-PRIME schedule when enabled
   // (falls back to the flat rate/ratePeak pair otherwise).
@@ -96,6 +98,9 @@ async function main() {
   const kwhPerF = config.smartHeat.tubLiters * 0.000646;
   const maxHeatRate = config.energy.heaterW / 1000 / kwhPerF; // °F/hr
   const model = new ThermalModel({ ambientFn: weather.ambientFn(), maxHeatRate });
+  // Stall detection uses the model's own expected heat rate (so it never alarms
+  // on legitimately-slow near-target heating).
+  stall = new StallMonitor({ model, notify: (t, m) => notify(t, m, { level: 'alert' }), log });
   const planner = new SmartHeatPlanner({
     model,
     targetF: config.smartHeat.targetF,
@@ -193,9 +198,17 @@ async function main() {
       log.warn('Pump health failed:', err.message);
     }
 
-    // Stall detection: element firing (heat=3) but water not rising.
+    // Stall detection: element firing (heat=3) but water not rising. Gate on
+    // online — a frozen offline frame (stale heat=3 + unchanging temp) would
+    // otherwise look exactly like a stall. Offline -> firing:false resets the run.
+    const online = status.online !== false;
     try {
-      stall.update({ firing: Number(status.raw && status.raw.heat) === 3, tempF: est.tempF, reliable: est.reliable, now });
+      stall.update({
+        firing: online && Number(status.raw && status.raw.heat) === 3,
+        tempF: est.tempF,
+        reliable: online && est.reliable,
+        now,
+      });
     } catch (err) {
       log.warn('Stall monitor failed:', err.message);
     }
@@ -209,14 +222,19 @@ async function main() {
       }
     }
 
-    // Energy accounting last, so peak/override context reflects this cycle.
-    try {
-      const { min, day } = localNow();
-      const lp = controller.lastPlan;
-      const ctx = { inPeak: planner.inPeak(min), overridden: !!(lp && lp.overridden) };
-      meter.sample(status, Date.now(), day, Math.floor(day / 100), ctx);
-    } catch (err) {
-      log.warn('Energy sample failed:', err.message);
+    // Energy accounting last, so peak/override context reflects this cycle. Skip
+    // when offline: getStatus returns a frozen last frame, so billing its wattage
+    // every cycle would invent kWh for a period whose true draw is unknown (the
+    // meter's >2h gap guard won't trip because samples keep arriving).
+    if (online) {
+      try {
+        const { min, day } = localNow();
+        const lp = controller.lastPlan;
+        const ctx = { inPeak: planner.inPeak(min), overridden: !!(lp && lp.overridden) };
+        meter.sample(status, Date.now(), day, Math.floor(day / 100), ctx);
+      } catch (err) {
+        log.warn('Energy sample failed:', err.message);
+      }
     }
   }
 

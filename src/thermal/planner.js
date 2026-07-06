@@ -62,6 +62,12 @@ export class SmartHeatPlanner {
       }
     }
     const startMin = Number.isFinite(needHours) ? this.targetMin - needHours * 60 - this.safetyMin : -Infinity;
+    // Circular minutes from now until the next target time (0..1439). Using
+    // time-until (not a minutes-of-day comparison) is what makes a pre-heat that
+    // must begin the previous evening — e.g. a lead window that crosses midnight
+    // for an early-morning target — work correctly.
+    const minsUntil = (((this.targetMin - nowMin) % 1440) + 1440) % 1440;
+    const leadMin = Number.isFinite(needHours) ? needHours * 60 + this.safetyMin : Infinity;
 
     let heat = null;
     let reason;
@@ -69,22 +75,36 @@ export class SmartHeatPlanner {
       heat = false;
       reason = 'peak';
       this._committed.active = false;
-    } else if (nowMin >= this.targetMin) {
-      heat = null;
-      reason = 'after-target';
-      this._committed.active = false;
-    } else {
-      const shouldStart = nowMin >= startMin && currentTemp < this.targetF;
-      if (this._committed.active || shouldStart) {
-        this._committed.active = true;
+    } else if (this._committed.active) {
+      // Already pre-heating: hold (through the "at temp, maintain to target time"
+      // phase) until we reach the target time. The window is FROZEN at commit —
+      // needHours shrinks to 0 as the tub warms, so recomputing it here would
+      // eject the latch and stop heating early.
+      const lead = this._committed.leadAtStart ?? leadMin;
+      if (minsUntil > 0 && minsUntil <= lead) {
         heat = true;
         reason = currentTemp < this.targetF ? 'preheat' : 'holding';
       } else {
+        // Reached/passed the target time (minsUntil hits 0 then wraps large).
         heat = null;
-        reason = 'waiting';
+        reason = 'after-target';
+        this._committed.active = false;
+      }
+    } else {
+      // Not yet heating: start when we enter the lead window (which, for an early
+      // target, can be the previous evening — minsUntil handles the wrap).
+      const shouldStart = minsUntil > 0 && minsUntil <= leadMin && currentTemp < this.targetF;
+      if (shouldStart) {
+        this._committed.active = true;
+        this._committed.leadAtStart = leadMin; // freeze the window for the hold phase
+        heat = true;
+        reason = 'preheat';
+      } else {
+        heat = null;
+        reason = minsUntil > 0 && minsUntil <= leadMin ? 'holding' : 'waiting';
       }
     }
-    return { heat, reason, startMin, needHours, targetMin: this.targetMin, targetF: this.targetF, inPeak };
+    return { heat, reason, startMin, needHours, minsUntil, targetMin: this.targetMin, targetF: this.targetF, inPeak };
   }
 }
 

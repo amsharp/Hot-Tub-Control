@@ -1,67 +1,84 @@
-// StallMonitor — detects the failure mode that was silent today: the element
-// firing continuously but the water not gaining heat. That means heat loss has
-// overtaken the heater (cover off, low water level, or restricted circulation),
-// and no amount of software can fix it — the owner must be told.
+// StallMonitor — detects the failure mode that was silent when the tub stalled:
+// the element firing continuously but the water not gaining heat (cover off, low
+// water, restricted circulation). It can only warn — the fix is physical.
 //
-// Logic: while the element is actually firing (heat=3) with a reliable reading,
-// track the temperature at which the current firing run began. If it has fired
-// for >= stallMinutes with < minGainF of rise, raise a one-shot warning. Any
-// real progress (>= minGainF) re-baselines; the element stopping resets it.
+// The threshold is NOT a fixed time: near the effective equilibrium the tub
+// legitimately heats slower and slower (the grounded model's own ceiling is only
+// ~1.3 °F/hr, and far less near target), so any fixed "1 °F in N minutes" rule
+// would false-alarm on normal heating. Instead we compare the firing-with-no-gain
+// duration to the model's OWN physically-expected time to gain `minGainF` at the
+// current temperature, and only cry stall at `factor`× that. If the model says
+// the next degree is unreachable at all (loss ≥ heater), that IS the stall — warn
+// after a short grace.
 export class StallMonitor {
   /**
    * @param {object} [opts]
-   * @param {number} [opts.stallMinutes] firing time with no gain before warning (default 40)
-   * @param {number} [opts.minGainF] rise that counts as progress (default 1)
+   * @param {{hoursToHeat:Function}} [opts.model] thermal model (for expected rate)
+   * @param {number} [opts.factor] multiple of the expected time before warning (default 2.5)
+   * @param {number} [opts.graceMinutes] min firing-no-gain before any warning (default 30)
+   * @param {number} [opts.minGainF] the gain that counts as progress, °F (default 1)
    * @param {Function} [opts.notify] async (title, message)
    * @param {object} [opts.log]
    */
-  constructor({ stallMinutes = 40, minGainF = 1, notify, log } = {}) {
-    this.stallMs = stallMinutes * 60_000;
+  constructor({ model, factor = 2.5, graceMinutes = 30, minGainF = 1, notify, log } = {}) {
+    this.model = model;
+    this.factor = factor;
+    this.graceMs = graceMinutes * 60_000;
     this.minGainF = minGainF;
     this.notify = notify || (async () => {});
     this.log = log || { info() {}, warn() {} };
-    this.run = null; // { t0, temp0 } current firing run baseline
+    this.run = null; // { t0, temp0 } current firing-run baseline
     this.warned = false;
   }
 
+  // Physically-expected time (ms) to gain minGainF at temp0. Infinity if the
+  // model says that degree is unreachable; null if no model (fixed fallback).
+  _expectedMs(temp0, now) {
+    if (!this.model || typeof this.model.hoursToHeat !== 'function') return null;
+    const h = this.model.hoursToHeat(temp0, temp0 + this.minGainF, now);
+    return Number.isFinite(h) ? h * 3_600_000 : Infinity;
+  }
+
   /**
-   * Feed one status cycle.
-   * @param {object} p
-   * @param {boolean} p.firing  element actively firing (raw heat === 3)
-   * @param {number|null} p.tempF  best temperature estimate
-   * @param {boolean} p.reliable  is the reading trustworthy (settled/circulating)
-   * @param {number} [p.now]
-   * @returns {boolean} true when a stall warning fired this cycle
+   * Feed one status cycle. Returns true the cycle a stall warning fires.
+   * @param {object} p @param {boolean} p.firing element actually firing (heat===3)
+   * @param {number|null} p.tempF best temp estimate  @param {boolean} p.reliable settled/circulating
    */
   update({ firing, tempF, reliable, now = Date.now() }) {
-    // Only reason about firing with a reliable temperature. If the element isn't
-    // firing, there's nothing to stall — reset.
     if (!firing) {
       this.run = null;
       this.warned = false;
       return false;
     }
     if (tempF == null || !reliable) return false;
-
     if (!this.run) {
       this.run = { t0: now, temp0: tempF };
       return false;
     }
-    // Real progress re-baselines and clears any prior warning.
     if (tempF - this.run.temp0 >= this.minGainF) {
-      this.run = { t0: now, temp0: tempF };
+      this.run = { t0: now, temp0: tempF }; // real progress -> re-baseline, re-arm
       this.warned = false;
       return false;
     }
-    // Firing long enough with no gain -> stalled. Warn once per episode.
-    if (!this.warned && now - this.run.t0 >= this.stallMs) {
+    if (this.warned) return false;
+
+    const noGainMs = now - this.run.t0;
+    const expMs = this._expectedMs(this.run.temp0, now);
+    let threshold;
+    if (expMs === Infinity)
+      threshold = this.graceMs; // model: next degree unreachable -> genuine stall
+    else if (expMs == null)
+      threshold = this.graceMs * 4; // no model -> conservative fixed ~2h
+    else threshold = Math.max(this.graceMs, this.factor * expMs);
+
+    if (noGainMs >= threshold) {
       this.warned = true;
-      const mins = Math.round((now - this.run.t0) / 60_000);
-      this.log.warn(`Heating stalled: firing ${mins} min with no temp gain (stuck ~${Math.round(tempF)}F).`);
+      const mins = Math.round(noGainMs / 60_000);
+      this.log.warn(`Heating stalled: firing ${mins} min without the expected temperature gain (stuck ~${Math.round(tempF)}F).`);
       this.notify(
         'Hot tub not heating',
-        `The heater has run ${mins} min with no temperature gain (stuck around ${Math.round(tempF)}°F). ` +
-          'Heat loss is matching the heater — check the cover is on, the water is above the min line, ' +
+        `The heater has run ${mins} min without gaining temperature (stuck around ${Math.round(tempF)}°F) — ` +
+          'far slower than physics allows. Check the cover is on, the water is above the min line, ' +
           'and the return valve is fully open.',
       ).catch(() => {});
       return true;
