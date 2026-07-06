@@ -58,9 +58,12 @@ export class ThermalModel {
    *   real outdoor forecast and the model learns only the tub's insulation loss.
    *   Returning null (or omitting it) falls back to the static prior ambient.
    */
-  constructor({ store, ambientFn } = {}) {
+  constructor({ store, ambientFn, maxHeatRate } = {}) {
     this.store = store || new JsonStore('thermal.json', { heat: emptySums(), cool: emptySums(), last: null });
     this.ambientFn = typeof ambientFn === 'function' ? ambientFn : () => null;
+    // Grounded heater ceiling P/C (°F/hr). Default ~1.3 °F/hr (1.32 kW into a
+    // ~1590 L / 1.027 kWh-per-°F tub). index.js passes the config-derived value.
+    this.maxHeatRate = Number.isFinite(maxHeatRate) && maxHeatRate > 0 ? maxHeatRate : 1.3;
     const d = this.store.data;
     if (!d.heat) d.heat = emptySums();
     if (!d.cool) d.cool = emptySums();
@@ -223,15 +226,38 @@ export class ThermalModel {
   }
 
   /**
-   * Hours of continuous heating to go from `fromF` to `toF`. Returns 0 if already
-   * at/above target, or Infinity if the target is above the heating equilibrium
-   * (the pump can't reach it under current conditions).
+   * Hours of continuous heating from `fromF` to `toF`, from a PHYSICALLY GROUNDED
+   * constant-power model — the water cannot warm faster than pouring the entire
+   * heater output into it with zero loss.
+   *
+   *   dT/dt = maxHeatRate − loss·(T − ambient)
+   *
+   * `maxHeatRate = P/C` (heater kW ÷ tub kWh/°F) is the hard ceiling; `loss` is
+   * the learned cooling coefficient and `ambient` the forecast. This replaces the
+   * old teq regression, which learned a bogus equilibrium (~104.6 °F, barely
+   * above target) from near-target modulation samples and so predicted heating
+   * FASTER than physics — starting the pre-heat too late to ever reach target.
+   *
+   * Returns 0 at/above target; Infinity when loss exceeds the heater before `toF`
+   * (e.g. cover off / cold snap — genuinely unreachable). Always ≥ the m·c·ΔT/P
+   * floor.
    */
-  hoursToHeat(fromF, toF) {
+  hoursToHeat(fromF, toF, atTs) {
     if (toF <= fromF) return 0;
-    const { loss, teq } = this.heatParams();
-    if (teq <= toF) return Infinity;
-    return (1 / loss) * Math.log((teq - fromF) / (teq - toF));
+    const { loss, ambient } = this.coolParams(atTs);
+    const rate0 = this.maxHeatRate; // °F/hr, the zero-loss ceiling (P/C)
+    const floor = (toF - fromF) / rate0; // m·c·ΔT / P — can never be faster
+    // Effective equilibrium the heater can hold against loss at this ambient.
+    const teq = ambient + rate0 / loss;
+    if (teq <= toF) return Infinity; // loss overtakes the heater before reaching toF
+    const hours = (1 / loss) * Math.log((teq - fromF) / (teq - toF));
+    return Math.max(hours, floor);
+  }
+
+  /** The grounded heating ceiling P/C (°F/hr) and derived equilibrium, for the API. */
+  heatCeiling(atTs) {
+    const { loss, ambient } = this.coolParams(atTs);
+    return { maxHeatRate: this.maxHeatRate, teqEff: ambient + this.maxHeatRate / loss };
   }
 
   /** Sample counts, for diagnostics. */

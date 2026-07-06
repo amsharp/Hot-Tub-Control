@@ -31,10 +31,35 @@ test('hoursToHeat is positive and larger from a colder start', () => {
   assert.ok(cold > warm);
 });
 
-test('hoursToHeat is Infinity when target exceeds heating equilibrium', () => {
-  const m = new ThermalModel({ store: fakeStore() });
-  // prior teq is 106, so 110 is unreachable
-  assert.equal(m.hoursToHeat(100, 110), Infinity);
+test('hoursToHeat never beats the physics floor m·c·ΔT / P', () => {
+  // maxHeatRate 1.0 °F/hr means the zero-loss floor is exactly ΔT hours.
+  const m = new ThermalModel({ store: fakeStore(), maxHeatRate: 1.0 });
+  const h = m.hoursToHeat(97, 104); // 7 °F
+  assert.ok(h >= 7 - 1e-9, `>= 7h floor (${h})`);
+  // With any real loss it must be strictly slower than the floor.
+  assert.ok(h > 7, `loss makes it slower than the floor (${h})`);
+});
+
+test('hoursToHeat respects a fast ceiling: a strong heater approaches the floor', () => {
+  // A very high ceiling makes loss negligible over the interval -> ~= floor.
+  const m = new ThermalModel({ store: fakeStore(), maxHeatRate: 100 });
+  const h = m.hoursToHeat(97, 104);
+  assert.ok(Math.abs(h - 7 / 100) < 0.02, `~0.07h at 100°F/hr ceiling (${h})`);
+});
+
+test('hoursToHeat is Infinity when loss overtakes the heater (cover-off / cold)', () => {
+  // Seed a learned cooling loss of 0.5/hr (n>=8; -xy/xx = 0.5) and a cold, weak
+  // ceiling: teqEff = ambient + rate/loss = 60 + 1.0/0.5 = 62 < 104 -> unreachable.
+  const store = {
+    data: {
+      heat: { n: 0, x: 0, y: 0, xx: 0, xy: 0 },
+      cool: { n: 10, x: 100, y: -50, xx: 1000, xy: -500 },
+      last: null,
+    },
+    save() {},
+  };
+  const m = new ThermalModel({ store, maxHeatRate: 1.0, ambientFn: () => 60 });
+  assert.equal(m.hoursToHeat(90, 104, 0), Infinity);
 });
 
 test('learns heating params from synthetic Newton data (circulating + settled)', () => {

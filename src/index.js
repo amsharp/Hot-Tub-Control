@@ -19,6 +19,7 @@ import { notify } from './notify/notifier.js';
 import { JsonStore } from './store.js';
 import { RawLog } from './rawlog.js';
 import { PumpHealth } from './pumphealth.js';
+import { StallMonitor } from './stallmonitor.js';
 import { ensureCloudFailsafe, utcHHMMForLocalMin } from './failsafe.js';
 
 async function main() {
@@ -59,6 +60,10 @@ async function main() {
   // analog flow signal on this hardware — see src/pumphealth.js.)
   const pumpHealth = new PumpHealth();
 
+  // Detects the "firing but not gaining heat" failure (cover off / low water /
+  // restricted flow) — physical, so it can only warn, not fix.
+  const stall = new StallMonitor({ notify: (t, m) => notify(t, m, { level: 'alert' }), log });
+
   // Software energy estimator, priced by the TOU-D-PRIME schedule when enabled
   // (falls back to the flat rate/ratePeak pair otherwise).
   const tou = config.energy.tou;
@@ -85,8 +90,12 @@ async function main() {
     refreshMin: config.weather.refreshMin,
   });
 
-  // Self-calibrating heat model + smart pre-heat planner.
-  const model = new ThermalModel({ ambientFn: weather.ambientFn() });
+  // Self-calibrating heat model + smart pre-heat planner. The heater ceiling is
+  // grounded in physics: maxHeatRate = P/C = heaterW / (litres × 0.646 Wh/kg°F),
+  // so the model can never predict heating faster than m·c·ΔT/P allows.
+  const kwhPerF = config.smartHeat.tubLiters * 0.000646;
+  const maxHeatRate = config.energy.heaterW / 1000 / kwhPerF; // °F/hr
+  const model = new ThermalModel({ ambientFn: weather.ambientFn(), maxHeatRate });
   const planner = new SmartHeatPlanner({
     model,
     targetF: config.smartHeat.targetF,
@@ -184,6 +193,13 @@ async function main() {
       log.warn('Pump health failed:', err.message);
     }
 
+    // Stall detection: element firing (heat=3) but water not rising.
+    try {
+      stall.update({ firing: Number(status.raw && status.raw.heat) === 3, tempF: est.tempF, reliable: est.reliable, now });
+    } catch (err) {
+      log.warn('Stall monitor failed:', err.message);
+    }
+
     if (tempF != null && config.smartHeat.enabled) {
       try {
         const { min, day } = localNow();
@@ -212,11 +228,14 @@ async function main() {
       targetMin: config.smartHeat.targetMin,
       peaks: config.smartHeat.peaks,
       plan: controller.lastPlan,
-      model: { heat: model.heatParams(), cool: model.coolParams(now), ...model.stats() },
+      model: {
+        cool: model.coolParams(now),
+        ceiling: model.heatCeiling(now), // grounded P/C ceiling + effective equilibrium
+        ...model.stats(),
+      },
       weather: {
-        enabled: weather.enabled,
+        ...weather.status(now),
         ambientNowF: weather.enabled ? weather.ambientAt(now) : null,
-        forecastPoints: weather.series.length,
       },
       health: {
         lastPollAgeSec: pollHealth.okAt ? Math.round((now - pollHealth.okAt) / 1000) : null,
@@ -265,9 +284,12 @@ async function main() {
       .refresh(true)
       .then((ok) => ok && log.info(`Weather forecast loaded (${weather.series.length} hourly points).`))
       .catch((err) => log.warn('Initial weather refresh failed:', err.message));
+    // Tick every few minutes; refresh() self-gates (full TTL when populated, but
+    // retries every ~10 min while the series is empty so a failed boot fetch
+    // can't leave the planner blind for hours).
     setInterval(
       () => weather.refresh().catch((err) => log.warn('Weather refresh failed:', err.message)),
-      config.weather.refreshMin * 60_000,
+      5 * 60_000,
     ).unref?.();
   }
 

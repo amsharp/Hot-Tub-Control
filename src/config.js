@@ -116,6 +116,10 @@ export const config = {
     targetMin: hhmm(process.env.SMART_HEAT_BY, 16 * 60), // default 4:00 PM
     peaks: peaks(process.env.SMART_HEAT_PEAK, [{ start: 16 * 60, end: 21 * 60 }]), // default 4-9 PM
     safetyMin: Number(process.env.SMART_HEAT_SAFETY_MIN) || 45,
+    // Tub water volume (litres) for the physics heat-time floor: the water can't
+    // warm faster than the whole heater output with zero loss, i.e.
+    // minHours = C·ΔT/P where C = litres × 0.646 Wh/(kg·°F). Ø1.5 m × 1.0 m × 90%.
+    tubLiters: Number(process.env.TUB_LITERS) || 1590,
   },
 
   // Forecast-grounded ambient temperature. When a location is set, the thermal

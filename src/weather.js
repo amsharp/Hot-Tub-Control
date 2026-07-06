@@ -20,15 +20,21 @@ export class WeatherProvider {
    * @param {Function} [opts.fetchImpl] injectable fetch for tests
    * @param {Function} [opts.now] injectable clock for tests
    */
-  constructor({ lat, lon, refreshMin = 120, fetchImpl, now } = {}) {
+  constructor({ lat, lon, refreshMin = 120, fetchImpl, now, wait, attempts = 3, backoffMs = 3_000, emptyRetryMin = 10 } = {}) {
     this.lat = lat;
     this.lon = lon;
     this.enabled = Number.isFinite(lat) && Number.isFinite(lon);
     this.ttlMs = refreshMin * 60_000;
+    this.emptyRetryMs = emptyRetryMin * 60_000;
+    this.attempts = attempts;
+    this.backoffMs = backoffMs;
     this.fetchImpl = fetchImpl || ((...a) => globalThis.fetch(...a));
     this.now = now || (() => Date.now());
+    this.wait = wait || ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.series = []; // [{ t: ms, f: °F }] sorted ascending
     this.fetchedAt = 0;
+    this.lastAttemptAt = null; // spaces retries (updated every attempt, ok or not)
+    this.lastError = null;
   }
 
   /** URL for the Open-Meteo hourly-temperature forecast (past day + next 2 days). */
@@ -41,35 +47,66 @@ export class WeatherProvider {
     );
   }
 
-  /** Fetch a fresh forecast if the cache is stale (or `force`). Never throws. */
+  /**
+   * Fetch a fresh forecast if the cache is stale (or `force`). Never throws.
+   * While we have NO series at all (fresh boot / after failures), refresh far
+   * more aggressively (every `emptyRetryMs`, default 10 min) instead of waiting
+   * the full TTL — the forecast is in-memory, so a redeploy plus one failed boot
+   * fetch would otherwise leave the planner blind for hours. `attempts` retries
+   * the fetch itself with a short backoff.
+   */
   async refresh(force = false) {
     if (!this.enabled) return false;
     const now = this.now();
-    if (!force && this.series.length && now - this.fetchedAt < this.ttlMs) return false;
-    try {
-      const res = await this.fetchImpl(this.url());
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const times = (data && data.hourly && data.hourly.time) || [];
-      const temps = (data && data.hourly && data.hourly.temperature_2m) || [];
-      const series = [];
-      for (let i = 0; i < times.length; i++) {
-        const iso = String(times[i]);
-        const t = Date.parse(iso.endsWith('Z') ? iso : iso + 'Z');
-        const f = Number(temps[i]);
-        if (Number.isFinite(t) && Number.isFinite(f)) series.push({ t, f });
+    const haveData = this.series.length > 0;
+    // Space retries by time-since-last-ATTEMPT (not last success): full TTL once
+    // we have a forecast, but every emptyRetryMs while the series is still empty.
+    const sinceAttempt = this.lastAttemptAt == null ? Infinity : now - this.lastAttemptAt;
+    const window = haveData ? this.ttlMs : this.emptyRetryMs;
+    if (!force && sinceAttempt < window) return false;
+    this.lastAttemptAt = now;
+
+    let lastErr = null;
+    for (let attempt = 0; attempt < this.attempts; attempt++) {
+      try {
+        const res = await this.fetchImpl(this.url());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const times = (data && data.hourly && data.hourly.time) || [];
+        const temps = (data && data.hourly && data.hourly.temperature_2m) || [];
+        const series = [];
+        for (let i = 0; i < times.length; i++) {
+          const iso = String(times[i]);
+          const t = Date.parse(iso.endsWith('Z') ? iso : iso + 'Z');
+          const f = Number(temps[i]);
+          if (Number.isFinite(t) && Number.isFinite(f)) series.push({ t, f });
+        }
+        series.sort((a, b) => a.t - b.t);
+        if (series.length) {
+          this.series = series;
+          this.fetchedAt = now;
+          this.lastError = null;
+          return true;
+        }
+        throw new Error('empty forecast series');
+      } catch (err) {
+        lastErr = err;
+        if (attempt < this.attempts - 1) await this.wait(this.backoffMs * (attempt + 1));
       }
-      series.sort((a, b) => a.t - b.t);
-      if (series.length) {
-        this.series = series;
-        this.fetchedAt = now;
-        return true;
-      }
-      return false;
-    } catch (err) {
-      log.warn('Weather refresh failed:', err.message);
-      return false;
     }
+    this.lastError = lastErr ? lastErr.message : 'unknown';
+    log.warn(`Weather refresh failed (${this.attempts} attempts): ${this.lastError}`);
+    return false;
+  }
+
+  /** Freshness/health for /api/plan. */
+  status(now = this.now()) {
+    return {
+      enabled: this.enabled,
+      points: this.series.length,
+      ageSec: this.fetchedAt ? Math.round((now - this.fetchedAt) / 1000) : null,
+      lastError: this.lastError || null,
+    };
   }
 
   /**

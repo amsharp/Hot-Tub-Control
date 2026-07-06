@@ -49,14 +49,14 @@ export class SmartHeatPlanner {
     // from the *current* temp underestimates on a cold night. Iterate a couple of
     // times — project cooling (via the forecast) to the candidate start, then
     // re-size the heat from that projected-lower temp.
-    let needHours = this.model.hoursToHeat(currentTemp, this.targetF);
+    let needHours = this.model.hoursToHeat(currentTemp, this.targetF, nowMs);
     if (nowMs != null && Number.isFinite(needHours) && typeof this.model.projectCool === 'function') {
       for (let k = 0; k < 2; k++) {
         const startM = this.targetMin - needHours * 60 - this.safetyMin;
         if (startM <= nowMin) break; // start is now/past — no pre-start cooling to model
         const startTs = nowMs + (startM - nowMin) * 60_000;
         const tempAtStart = this.model.projectCool(currentTemp, nowMs, startTs);
-        const nh = this.model.hoursToHeat(tempAtStart, this.targetF);
+        const nh = this.model.hoursToHeat(tempAtStart, this.targetF, startTs);
         if (!Number.isFinite(nh)) break;
         needHours = nh;
       }
