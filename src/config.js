@@ -139,13 +139,19 @@ export const config = {
     refreshMin: Number(process.env.WEATHER_REFRESH_MIN) || 120,
   },
 
-  // Software energy estimate (the pump has no meter). Grounded to a US 120V/12A
-  // SaluSpa Airjet: heater ~1300W (only when actively firing), blower ~600W,
-  // circulation pump ~40W.
+  // Software energy estimate (the pump has no meter). Grounded to the US 120V
+  // Airjet NAMEPLATE (Coleman SaluSpa 90467E: 110-120V, 12A total, at 20°C):
+  //   Heat element 11.3A -> ~1356W cold. PTC ceramic droops when hot, so 1320W
+  //     is a fair operating average. Only counted while heat=3 (element firing).
+  //   Water pump 0.7A -> ~84W wall draw (drives the 12V/50W DC circ pump via its
+  //     PSU). ~60W is a conservative running value; it dominates the non-heating
+  //     baseline, so it was the meaningful correction (was 40W ≈ half nameplate).
+  //   Massage blower 6.5A -> ~780W. Mutually exclusive with the heater (11.3+6.5
+  //     = 17.8A would exceed the 12A circuit), so it's never summed with it.
   energy: {
-    heaterW: Number(process.env.ENERGY_HEATER_W) || 1300,
-    pumpW: Number(process.env.ENERGY_PUMP_W) || 40,
-    blowerW: Number(process.env.ENERGY_BLOWER_W) || 600,
+    heaterW: Number(process.env.ENERGY_HEATER_W) || 1320,
+    pumpW: Number(process.env.ENERGY_PUMP_W) || 60,
+    blowerW: Number(process.env.ENERGY_BLOWER_W) || 780,
     rate: Number(process.env.ELECTRICITY_RATE) || 0.4, // $/kWh fallback (TOU disabled)
     ratePeak: Number(process.env.ELECTRICITY_RATE_PEAK) || 0, // $/kWh during peak (0 = same as rate)
     // SCE TOU-D-PRIME time-of-use pricing, bundled $/kWh as published on
