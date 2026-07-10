@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ensureCloudFailsafe, utcHHMMForLocalMin, FAILSAFE_REMARK } from '../src/failsafe.js';
+import { ensureCloudFailsafe, clearCloudFailsafe, utcHHMMForLocalMin, FAILSAFE_REMARK } from '../src/failsafe.js';
 
 const quiet = { info() {}, warn() {} };
 
@@ -63,6 +63,35 @@ test('API failure returns error without throwing', async () => {
     },
   };
   const r = await ensureCloudFailsafe({ client: c, timeUtc: '23:02', log: quiet });
+  assert.equal(r, 'error');
+});
+
+test('clearCloudFailsafe deletes only our entries and leaves others alone', async () => {
+  const c = fakeClient([
+    { id: 'a', remark: FAILSAFE_REMARK, time: '23:02' },
+    { id: 'b', remark: FAILSAFE_REMARK, time: '22:02' },
+    { id: 'x', remark: 'someone-else', time: '10:00' },
+  ]);
+  const r = await clearCloudFailsafe({ client: c, log: quiet });
+  assert.equal(r, 'removed');
+  assert.deepEqual(c.calls.deleted.sort(), ['a', 'b']);
+  assert.equal(c.calls.created.length, 0);
+});
+
+test('clearCloudFailsafe is a no-op when nothing of ours is parked', async () => {
+  const c = fakeClient([{ id: 'x', remark: 'someone-else', time: '10:00' }]);
+  const r = await clearCloudFailsafe({ client: c, log: quiet });
+  assert.equal(r, 'ok');
+  assert.equal(c.calls.deleted.length, 0);
+});
+
+test('clearCloudFailsafe returns error without throwing when the cloud is down', async () => {
+  const c = {
+    async listSchedulers() {
+      throw new Error('cloud down');
+    },
+  };
+  const r = await clearCloudFailsafe({ client: c, log: quiet });
   assert.equal(r, 'error');
 });
 

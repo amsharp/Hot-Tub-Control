@@ -63,3 +63,31 @@ export async function ensureCloudFailsafe({ client, timeUtc, log = console }) {
     return 'error';
   }
 }
+
+/**
+ * Remove every cloud failsafe entry we previously parked. Used when automatic
+ * scheduling is turned off: otherwise the daily all-off task keeps executing
+ * from Gizwits' infrastructure and would turn the tub off mid-afternoon,
+ * fighting a user who now controls it by hand / on-device timer. Idempotent and
+ * never throws — a partial failure is logged and cleaned up on the next boot.
+ * @returns {'ok'|'removed'|'error'} 'ok' = nothing of ours was parked.
+ */
+export async function clearCloudFailsafe({ client, log = console }) {
+  try {
+    const entries = (await client.listSchedulers()) || [];
+    const ours = entries.filter((e) => e.remark === FAILSAFE_REMARK);
+    if (!ours.length) return 'ok';
+    for (const e of ours) {
+      try {
+        await client.deleteScheduler(e.id);
+      } catch (err) {
+        log.warn(`Failsafe: could not delete entry ${e.id}: ${err.message}`);
+      }
+    }
+    log.info(`Cloud failsafe removed (${ours.length} entr${ours.length === 1 ? 'y' : 'ies'}) — scheduling disabled.`);
+    return 'removed';
+  } catch (err) {
+    log.warn(`Cloud failsafe teardown failed: ${err.message}`);
+    return 'error';
+  }
+}

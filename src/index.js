@@ -20,7 +20,7 @@ import { JsonStore } from './store.js';
 import { RawLog } from './rawlog.js';
 import { PumpHealth } from './pumphealth.js';
 import { StallMonitor } from './stallmonitor.js';
-import { ensureCloudFailsafe, utcHHMMForLocalMin } from './failsafe.js';
+import { ensureCloudFailsafe, clearCloudFailsafe, utcHHMMForLocalMin } from './failsafe.js';
 
 async function main() {
   // Degraded-boot contract: the HTTP server (and /healthz) must come up even
@@ -345,6 +345,13 @@ async function main() {
       });
     syncFailsafe();
     setInterval(syncFailsafe, 12 * 3_600_000).unref?.();
+  } else if (hasBestwayCreds && !config.smartHeat.enabled) {
+    // Automatic scheduling is off: remove any all-off task we previously parked
+    // in the Gizwits cloud scheduler so it doesn't keep turning the tub off
+    // every afternoon and fight the on-device timer.
+    clearCloudFailsafe({ client, log }).catch((err) =>
+      log.warn('Cloud failsafe teardown failed:', err.message),
+    );
   }
 
   // Everything below talks to the pump, so it only runs once credentials exist.
@@ -358,7 +365,19 @@ async function main() {
       log.warn('Could not read spa status on startup:', err.message);
     }
 
-    scheduler.start();
+    // SMART_HEAT_ENABLED is the master switch for automatic pump control. With it
+    // off, the tub is left to its on-device timer: neither the smart pre-heat
+    // controller (gated in onStatus) nor the cron scheduler issues on/off. The
+    // fault watchdog still runs — it only clears E02 faults, it doesn't schedule.
+    if (config.smartHeat.enabled) {
+      scheduler.start();
+    } else {
+      log.info(
+        'Automatic scheduling disabled (SMART_HEAT_ENABLED=false) — leaving the ' +
+          'pump to its on-device timer. Smart pre-heat and cron scheduler are inactive; ' +
+          'fault auto-recovery (E02) stays on.',
+      );
+    }
     watchdog.start();
 
     // Real-time fault reaction via the Gizwits push socket (optional, best-effort).
