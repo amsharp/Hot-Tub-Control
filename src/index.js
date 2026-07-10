@@ -107,6 +107,7 @@ async function main() {
     targetMin: config.smartHeat.targetMin,
     peaks: config.smartHeat.peaks,
     safetyMin: config.smartHeat.safetyMin,
+    maxLeadHours: config.smartHeat.maxLeadHours,
   });
   // Cloud-path liveness: stamped on every successful status read; a separate
   // monitor alerts (once per outage) when reads have been failing for a while.

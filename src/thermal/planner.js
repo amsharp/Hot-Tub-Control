@@ -12,12 +12,19 @@ export class SmartHeatPlanner {
    * @param {{start:number,end:number}[]} [opts.peaks] no-heat windows (minutes-of-day)
    * @param {number} [opts.safetyMin] head-start buffer in minutes (default 45)
    */
-  constructor({ model, targetF = 104, targetMin = 16 * 60, peaks = [{ start: 16 * 60, end: 21 * 60 }], safetyMin = 45 } = {}) {
+  constructor({ model, targetF = 104, targetMin = 16 * 60, peaks = [{ start: 16 * 60, end: 21 * 60 }], safetyMin = 45, maxLeadHours = 7 } = {}) {
     this.model = model;
     this.targetF = targetF;
     this.targetMin = targetMin;
     this.peaks = peaks;
     this.safetyMin = safetyMin;
+    // Hard cap on how far before the target the pre-heat may start. Without it,
+    // a marginal heater (effective equilibrium barely above target) makes the
+    // model predict 10-18h to gain the last couple degrees, ballooning the lead
+    // window until it heats ~24/7 minus peak. Capping bounds heating to the
+    // afternoon: on a hard day it gets as close to target as the window allows
+    // and stops, rather than running all evening/night.
+    this.maxLeadMin = maxLeadHours * 60;
     this._committed = { day: null, active: false };
   }
 
@@ -67,9 +74,15 @@ export class SmartHeatPlanner {
     // must begin the previous evening — e.g. a lead window that crosses midnight
     // for an early-morning target — work correctly.
     const minsUntil = (((this.targetMin - nowMin) % 1440) + 1440) % 1440;
-    const leadMin = Number.isFinite(needHours) ? needHours * 60 + this.safetyMin : Infinity;
+    // Lead window, capped: never begin more than maxLeadMin before the target.
+    const rawLead = Number.isFinite(needHours) ? needHours * 60 + this.safetyMin : Infinity;
+    const leadMin = Math.min(rawLead, this.maxLeadMin);
 
-    let heat = null;
+    // Outside the pre-heat/hold window the tub should be OFF (heat=false, so the
+    // controller actively shuts it down), not left as-is (null) — otherwise a
+    // heater somehow left on lingers all evening. Manual use outside the window
+    // is respected via the controller's override detection.
+    let heat = false;
     let reason;
     if (inPeak) {
       heat = false;
@@ -77,16 +90,16 @@ export class SmartHeatPlanner {
       this._committed.active = false;
     } else if (this._committed.active) {
       // Already pre-heating: hold (through the "at temp, maintain to target time"
-      // phase) until we reach the target time. The window is FROZEN at commit —
-      // needHours shrinks to 0 as the tub warms, so recomputing it here would
-      // eject the latch and stop heating early.
-      const lead = this._committed.leadAtStart ?? leadMin;
+      // phase) until we reach the target time. The window is FROZEN at commit
+      // (but still capped) — needHours shrinks to 0 as the tub warms, so
+      // recomputing it here would eject the latch and stop heating early.
+      const lead = Math.min(this._committed.leadAtStart ?? leadMin, this.maxLeadMin);
       if (minsUntil > 0 && minsUntil <= lead) {
         heat = true;
         reason = currentTemp < this.targetF ? 'preheat' : 'holding';
       } else {
         // Reached/passed the target time (minsUntil hits 0 then wraps large).
-        heat = null;
+        heat = false;
         reason = 'after-target';
         this._committed.active = false;
       }
@@ -100,8 +113,8 @@ export class SmartHeatPlanner {
         heat = true;
         reason = 'preheat';
       } else {
-        heat = null;
-        reason = minsUntil > 0 && minsUntil <= leadMin ? 'holding' : 'waiting';
+        heat = false;
+        reason = minsUntil > 0 && minsUntil <= leadMin ? 'ready' : 'waiting';
       }
     }
     return { heat, reason, startMin, needHours, minsUntil, targetMin: this.targetMin, targetF: this.targetF, inPeak };

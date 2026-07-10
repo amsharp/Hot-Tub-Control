@@ -170,6 +170,19 @@ test('boot grace: fresh state + pump running during peak -> assume manual use', 
   assert.equal(client.calls.length, 0);
 });
 
+test('evening manual-on is an override with a multi-hour stand-down (not 2 min)', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  // 10 PM, plan says off (after-target); pump off -> seeds lastRunning=false.
+  await ctl.onCycle(OFF, 102, true, { nowMs: 22 * 3_600_000, min: 22 * 60, day: 1 });
+  // User turns it ON.
+  const nowMs = 22 * 3_600_000 + 120_000;
+  const plan = await ctl.onCycle(RUNNING, 102, true, { nowMs, min: 22 * 60 + 2, day: 1 });
+  assert.equal(plan.overridden, true, 'first evening press respected');
+  const standDownMin = (ctl.overrideUntil - nowMs) / 60_000;
+  assert.ok(standDownMin > 60, `stands down hours, not ~2 min (${standDownMin})`);
+});
+
 test('machineAction() prevents watchdog recovery from reading as an override', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });

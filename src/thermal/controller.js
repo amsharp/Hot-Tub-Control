@@ -136,14 +136,24 @@ export class SmartHeatController {
     // legitimately off doesn't hit this: running would be false.)
     // (lastPlan === null distinguishes a true fresh boot from machineAction(),
     // which also clears lastRunning mid-run — recovery must re-assert the plan.)
-    if (!overrideDetected && this.lastPlan === null && this.lastRunning == null && this.overrideUntil === 0 && running && p.heat === false) {
+    if (!overrideDetected && this.lastPlan === null && this.lastRunning == null && this.overrideUntil === 0 && running && p.inPeak && p.heat === false) {
       overrideDetected = true;
       this.log.info('SmartHeat: found pump running during peak on first cycle — assuming manual use.');
     }
 
     if (overrideDetected) {
-      const endMin = p.inPeak ? this.planner.peakEndMin(min) : p.targetMin;
-      const untilMs = Math.max(2, (endMin ?? min) - min) * 60_000;
+      // Stand down until the end of the relevant window. In peak: the peak end.
+      // Otherwise: until the next target time (circular — an evening/overnight
+      // override must NOT collapse to ~0 the way targetMin−nowMin does once the
+      // target has passed), capped at 12h so it re-asserts by the next morning.
+      let untilMs;
+      if (p.inPeak) {
+        const end = this.planner.peakEndMin(min);
+        untilMs = Math.max(2, (end ?? min) - min) * 60_000;
+      } else {
+        const minsToTarget = (((p.targetMin - min) % 1440) + 1440) % 1440;
+        untilMs = Math.min(Math.max(2, minsToTarget), 12 * 60) * 60_000;
+      }
       this.overrideUntil = nowMs + untilMs;
       this.cmd = null;
       this.log.info(`SmartHeat: manual override detected (${p.reason}) — standing down`);
