@@ -170,6 +170,36 @@ test('boot grace: fresh state + pump running during peak -> assume manual use', 
   assert.equal(client.calls.length, 0);
 });
 
+test('boot grace: fresh state + pump running OFF-PEAK also stands down (not force-off)', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  // Fresh boot / missing volume at 10:40 PM during a manual evening soak — the
+  // plan wants off (outside the pre-heat window), but a genuine fresh boot must
+  // not shut the tub off under the user. (Regression guard: boot-grace was once
+  // gated on p.inPeak, which force-killed off-peak soaks after a redeploy.)
+  const plan = await ctl.onCycle(RUNNING, 102, true, { nowMs: 22 * 3_600_000 + 40 * 60_000, min: 22 * 60 + 40, day: 1 });
+  assert.equal(plan.heat, false, 'planner wants off outside the window');
+  assert.equal(plan.overridden, true, 'but boot-grace stands down instead of killing the soak');
+  assert.equal(client.calls.length, 0, 'no setAllOff issued on a fresh boot mid-soak');
+});
+
+test('manual soak started DURING peak is not force-killed the instant peak ends', async () => {
+  const client = fakeClient();
+  const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });
+  await warm(ctl); // seed steady state (lastRunning=true), skips boot-grace
+  // 4:00 PM peak begins: controller kills everything, confirmed next cycle.
+  await ctl.onCycle(RUNNING, 104, true, { ...PEAK, nowMs: 16 * 3_600_000, min: 16 * 60 });
+  await ctl.onCycle(OFF, 104, true, { ...PEAK, nowMs: 16 * 3_600_000 + 120_000, min: 16 * 60 + 2 });
+  client.calls.length = 0;
+  // 8:00 PM (still in the 4-9 peak): user turns it on for an evening soak.
+  const on = await ctl.onCycle(RUNNING, 100, true, { ...PEAK, nowMs: 20 * 3_600_000, min: 20 * 60 });
+  assert.equal(on.overridden, true, 'in-peak manual press is respected');
+  // 9:02 PM — peak is over. Pre-commit this force-killed the soak; it must not.
+  const after = await ctl.onCycle(RUNNING, 101, true, { nowMs: 21 * 3_600_000 + 120_000, min: 21 * 60 + 2, day: 1 });
+  assert.equal(after.overridden, true, 'stand-down outlasts peak end — soak survives 9 PM');
+  assert.equal(client.calls.filter((x) => x === 'off').length, 0, 'no off issued against the soak');
+});
+
 test('evening manual-on is an override with a multi-hour stand-down (not 2 min)', async () => {
   const client = fakeClient();
   const ctl = new SmartHeatController({ client, planner: planner(), targetF: 104 });

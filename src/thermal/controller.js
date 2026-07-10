@@ -130,31 +130,39 @@ export class SmartHeatController {
     }
 
     // Boot grace: first-ever cycle (no persisted state) finding the pump
-    // RUNNING during peak. The controller can't have left it that way — its
-    // peak policy is all-off — so someone wanted it on. Stand down rather than
-    // kill a soak seconds after a restart. (A mid-peak restart with the tub
-    // legitimately off doesn't hit this: running would be false.)
+    // RUNNING while the plan wants it off. On a genuine fresh boot we cannot tell
+    // a leftover schedule-on state from a live manual soak, so we stand down
+    // rather than shut the tub off seconds after a restart — killing a soak the
+    // user is in is the worse error. (This is NOT gated on peak: an off-peak
+    // fresh-boot soak — morning/midday/evening — must be protected too. The
+    // planner's maxLeadMin cap independently prevents the "heater latched on all
+    // evening" case that a running-at-boot state used to be conflated with, so
+    // the broad grace no longer risks re-latching evening heat.) The tradeoff:
+    // an actual stale schedule-on state lingers until the next window instead of
+    // being actively shut off — acceptable versus killing live manual use.
     // (lastPlan === null distinguishes a true fresh boot from machineAction(),
     // which also clears lastRunning mid-run — recovery must re-assert the plan.)
-    if (!overrideDetected && this.lastPlan === null && this.lastRunning == null && this.overrideUntil === 0 && running && p.inPeak && p.heat === false) {
+    if (!overrideDetected && this.lastPlan === null && this.lastRunning == null && this.overrideUntil === 0 && running && p.heat === false) {
       overrideDetected = true;
-      this.log.info('SmartHeat: found pump running during peak on first cycle — assuming manual use.');
+      this.log.info('SmartHeat: found pump running on first cycle — assuming manual use, standing down.');
     }
 
     if (overrideDetected) {
-      // Stand down until the end of the relevant window. In peak: the peak end.
-      // Otherwise: until the next target time (circular — an evening/overnight
-      // override must NOT collapse to ~0 the way targetMin−nowMin does once the
-      // target has passed), capped at 12h so it re-asserts by the next morning.
-      let untilMs;
+      // Stand down until we'd next legitimately want to act: the circular minutes
+      // until the next target time (an evening/overnight override must NOT
+      // collapse to ~0 the way targetMin−nowMin does once the target has passed),
+      // capped at 12h so it re-asserts by the next morning. This applies IN peak
+      // too: a soak the user started during peak must not be force-killed the
+      // instant peak ends — the old peak-end-only stand-down did exactly that.
+      // When mid-peak, still never re-assert (and risk heating) before the peak
+      // ends, so floor the stand-down at the remaining peak.
+      const minsToTarget = (((p.targetMin - min) % 1440) + 1440) % 1440;
+      let untilMin = Math.min(Math.max(2, minsToTarget), 12 * 60);
       if (p.inPeak) {
         const end = this.planner.peakEndMin(min);
-        untilMs = Math.max(2, (end ?? min) - min) * 60_000;
-      } else {
-        const minsToTarget = (((p.targetMin - min) % 1440) + 1440) % 1440;
-        untilMs = Math.min(Math.max(2, minsToTarget), 12 * 60) * 60_000;
+        if (end != null) untilMin = Math.max(untilMin, end - min);
       }
-      this.overrideUntil = nowMs + untilMs;
+      this.overrideUntil = nowMs + untilMin * 60_000;
       this.cmd = null;
       this.log.info(`SmartHeat: manual override detected (${p.reason}) — standing down`);
     }
